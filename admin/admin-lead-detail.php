@@ -713,7 +713,7 @@ $timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $foll
         </div>
 
         <!-- Client Queries -->
-        <div class="card">
+        <div class="card" id="clientQueriesCard">
             <h2>Client Queries</h2>
             <?php if (empty($queries)): ?>
                 <div class="no-data">No queries found.</div>
@@ -956,7 +956,7 @@ $timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $foll
         const queriesData = <?php echo json_encode($queries); ?>;
         
         function updateRespondButton() {
-            const checkedBoxes = document.querySelectorAll('.query-checkbox:checked');
+            const checkedBoxes = document.querySelectorAll('#clientQueriesCard .query-checkbox:checked');
             const respondBtn = document.getElementById('respondBtn');
             if (checkedBoxes.length > 0) {
                 respondBtn.disabled = false;
@@ -968,41 +968,44 @@ $timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $foll
         }
         
         function selectAllQueries() {
-            document.querySelectorAll('.query-checkbox').forEach(cb => cb.checked = true);
-            document.getElementById('selectAllCheckbox').checked = true;
+            document.querySelectorAll('#clientQueriesCard .query-checkbox').forEach(cb => cb.checked = true);
+            const sel = document.getElementById('selectAllCheckbox');
+            if (sel) sel.checked = true;
             updateRespondButton();
         }
         
         function deselectAllQueries() {
-            document.querySelectorAll('.query-checkbox').forEach(cb => cb.checked = false);
-            document.getElementById('selectAllCheckbox').checked = false;
+            document.querySelectorAll('#clientQueriesCard .query-checkbox').forEach(cb => cb.checked = false);
+            const sel = document.getElementById('selectAllCheckbox');
+            if (sel) sel.checked = false;
             updateRespondButton();
         }
         
         function toggleAllQueries(checkbox) {
-            document.querySelectorAll('.query-checkbox').forEach(cb => cb.checked = checkbox.checked);
+            document.querySelectorAll('#clientQueriesCard .query-checkbox').forEach(cb => cb.checked = checkbox.checked);
             updateRespondButton();
         }
         
         function openResponseModal() {
-            const checkedBoxes = document.querySelectorAll('.query-checkbox:checked');
+            const checkedBoxes = document.querySelectorAll('#clientQueriesCard .query-checkbox:checked');
             if (checkedBoxes.length === 0) {
                 alert('Please select at least one query to respond to.');
                 return;
             }
             
-            const selectedIds = Array.from(checkedBoxes).map(cb => parseInt(cb.value));
-            const selectedQueries = queriesData.filter(q => selectedIds.includes(q.id));
-            
-            // Display selected queries
+            // Build selected list from DOM (checkbox -> row -> ID + Query cells)
             const listContainer = document.getElementById('selectedQueriesList');
-            listContainer.innerHTML = '<strong>Selected Queries (' + selectedQueries.length + '):</strong><br><br>';
-            selectedQueries.forEach((query, index) => {
-                const div = document.createElement('div');
-                div.style.cssText = 'margin-bottom: 10px; padding: 10px; background: white; border-left: 3px solid #17a2b8; border-radius: 4px;';
-                div.innerHTML = `<strong>Query #${query.id}:</strong> ${query.query_text.substring(0, 100)}${query.query_text.length > 100 ? '...' : ''}`;
-                listContainer.appendChild(div);
+            const fragments = ['<strong>Selected Queries (' + checkedBoxes.length + '):</strong><br><br>'];
+            checkedBoxes.forEach((cb) => {
+                const row = cb.closest('tr');
+                if (!row) return;
+                const cells = row.querySelectorAll('td');
+                const id = (cells[1] && cells[1].textContent.trim()) || cb.value;
+                const queryText = (cells[2] && cells[2].textContent.trim()) || '';
+                const display = queryText.length > 100 ? queryText.substring(0, 100) + '...' : queryText;
+                fragments.push('<div style="margin-bottom: 10px; padding: 10px; background: white; border-left: 3px solid #17a2b8; border-radius: 4px;"><strong>Query #' + id + ':</strong> ' + escapeHtml(display) + '</div>');
             });
+            listContainer.innerHTML = fragments.join('');
             
             // Clear previous response
             document.getElementById('responseText').value = '';
@@ -1011,12 +1014,18 @@ $timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $foll
             document.getElementById('responseModal').style.display = 'flex';
         }
         
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
         function closeResponseModal() {
             document.getElementById('responseModal').style.display = 'none';
         }
         
         function sendBulkResponse() {
-            const checkedBoxes = document.querySelectorAll('.query-checkbox:checked');
+            const checkedBoxes = document.querySelectorAll('#clientQueriesCard .query-checkbox:checked');
             const responseText = document.getElementById('responseText').value.trim();
             
             if (checkedBoxes.length === 0) {
