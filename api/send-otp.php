@@ -73,28 +73,32 @@ function checkExistingOtp(PDO $pdo, int $leadId): ?array
 }
 
 /**
- * Invalidate old pending OTPs for a lead
+ * Invalidate old pending and failed OTPs for a lead (before sending a new one).
+ * Must invalidate both 'pending' and 'failed' so that on "Resend OTP" after an
+ * invalid attempt we don't leave the failed OTP in play; the new OTP gets a
+ * full 10-minute window.
  */
 function invalidateOldOtps(PDO $pdo, int $leadId): void
 {
     $stmt = $pdo->prepare("
         UPDATE otp_verifications
         SET status = 'expired'
-        WHERE lead_id = ? 
-        AND status = 'pending'
-        AND expires_at > NOW()
+        WHERE lead_id = ?
+        AND status IN ('pending', 'failed')
     ");
     $stmt->execute([$leadId]);
 }
 
 /**
  * Create new OTP record
+ * Expiry is always 10 minutes from now, using IST for consistency with DB.
  */
 function createOtpRecord(PDO $pdo, int $leadId, string $otp, string $otpHash): int
 {
-    // Set expiry to 10 minutes from now
-    $expiresAt = date('Y-m-d H:i:s', time() + 600); // 10 minutes = 600 seconds
-    
+    $tz = new DateTimeZone('Asia/Kolkata');
+    $expires = (new DateTime('now', $tz))->modify('+600 seconds');
+    $expiresAt = $expires->format('Y-m-d H:i:s');
+
     $stmt = $pdo->prepare("
         INSERT INTO otp_verifications (
             lead_id, otp_code, otp_hash, attempts, max_attempts, 
@@ -302,16 +306,11 @@ try {
             exit;
         }
         
-        // Check if OTP is still valid (not expired)
-        $expiresAt = strtotime($existingOtp['expires_at']);
-        if ($expiresAt > time()) {
-            // OTP still valid, don't send new one
-            // But we'll allow resending if requested
-            // For security, we'll invalidate old one and create new
-        }
+        // OTP still valid or not: we always invalidate old and create new on resend.
+        // No early exit; fall through to invalidate + create.
     }
-    
-    // Invalidate old pending OTPs
+
+    // Invalidate old pending and failed OTPs, then create new with full 10‑min expiry
     invalidateOldOtps($pdo, $leadId);
     
     // Generate new OTP

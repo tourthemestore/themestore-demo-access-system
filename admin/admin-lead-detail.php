@@ -8,6 +8,7 @@
 
 // Load configuration
 require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../includes/admin-auth.php';
 
 // Get lead ID from URL
 $leadId = isset($_GET['id']) ? (int) $_GET['id'] : 0;
@@ -590,6 +591,19 @@ $timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $foll
                 <div class="info-item">
                     <span class="info-label">Campaign Source</span>
                     <span class="info-value"><?php echo htmlspecialchars($lead['campaign_source'] ?? 'N/A', ENT_QUOTES, 'UTF-8'); ?></span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Interest</span>
+                    <span class="info-value"><?php
+                        $interest = $lead['interest'] ?? null;
+                        if ($interest === 'interested') {
+                            echo '<span class="badge badge-verified">👍 Interested</span>';
+                        } elseif ($interest === 'not_interested') {
+                            echo '<span class="badge badge-pending">👎 Not interested</span>';
+                        } else {
+                            echo '—';
+                        }
+                    ?></span>
                 </div>
                 <div class="info-item">
                     <span class="info-label">Verification Status</span>

@@ -8,6 +8,7 @@
 
 // Load configuration
 require_once __DIR__ . '/../config/config.php';
+require_once __DIR__ . '/../includes/admin-auth.php';
 
 /**
  * Get all leads with related data

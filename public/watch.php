@@ -118,6 +118,20 @@ if (empty($token)) {
 // If token is valid and not used, show video
 $showVideo = ($demoLink !== false && !$isUsed);
 
+// Get current lead interest (for watch page UI)
+$leadInterest = null;
+if ($showVideo && $demoLink) {
+    try {
+        $pdo = getDbConnection();
+        $st = $pdo->prepare("SELECT interest FROM leads_for_demo WHERE id = ? LIMIT 1");
+        $st->execute([$demoLink['lead_id']]);
+        $row = $st->fetch();
+        $leadInterest = isset($row['interest']) ? $row['interest'] : null;
+    } catch (Exception $e) {
+        $leadInterest = null;
+    }
+}
+
 // Get Vimeo password if configured (needed in both HTML and JavaScript sections)
 $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD) ? VIMEO_VIDEO_PASSWORD : null;
 ?>
@@ -197,6 +211,49 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             font-size: 14px;
             text-align: center;
         }
+        .mobile-notice {
+            display: none;
+            background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
+            border: 2px solid #ffc107;
+            color: #5d4e37;
+            padding: 14px 16px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            font-size: 14px;
+            align-items: center;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        .mobile-notice.is-visible {
+            display: flex;
+        }
+        .mobile-notice-icon {
+            font-size: 24px;
+            flex-shrink: 0;
+        }
+        .mobile-notice-text {
+            flex: 1;
+            min-width: 200px;
+        }
+        .mobile-notice-text strong {
+            display: block;
+            margin-bottom: 2px;
+            color: #4a3f2f;
+        }
+        .mobile-notice-dismiss {
+            background: #ffc107;
+            color: #5d4e37;
+            border: none;
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 13px;
+            font-weight: 600;
+            cursor: pointer;
+            flex-shrink: 0;
+        }
+        .mobile-notice-dismiss:hover {
+            background: #ffb300;
+        }
         .loading {
             text-align: center;
             color: #666;
@@ -222,6 +279,17 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
     <div class="container">
         <?php if ($showVideo): ?>
             <h1>ThemeStore Demo Video</h1>
+
+            <!-- Mobile device notice: watch on Desktop/Laptop for better performance -->
+            <div id="mobile-notice" class="mobile-notice">
+                <span class="mobile-notice-icon">💻</span>
+                <div class="mobile-notice-text">
+                    <strong>For better performance</strong>
+                    Watch this demo on a Desktop or Laptop for the best experience.
+                </div>
+                <button type="button" id="mobile-notice-dismiss" class="mobile-notice-dismiss" aria-label="Dismiss">Continue on mobile</button>
+            </div>
+
             <div class="video-wrapper">
                 <?php
                 // Build embed URL with all parameters
@@ -273,6 +341,17 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                 </div>
                 <?php endif; ?>
             </div>
+
+            <!-- Interest selection (Interested / Not interested) -->
+            <div id="interest-section" data-initial-interest="<?php echo $leadInterest ? htmlspecialchars($leadInterest, ENT_QUOTES, 'UTF-8') : ''; ?>" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
+                <p style="margin: 0 0 12px 0; font-weight: 600; color: #333; font-size: 15px;">Are you interested in our demo?</p>
+                <div id="interest-buttons" style="display: flex; gap: 12px; flex-wrap: wrap;">
+                    <button type="button" id="btn-interested" class="interest-btn" data-interest="interested" style="padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; border: 2px solid #28a745; background: #fff; color: #28a745; transition: all 0.2s;">👍 Interested</button>
+                    <button type="button" id="btn-not-interested" class="interest-btn" data-interest="not_interested" style="padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; border: 2px solid #dc3545; background: #fff; color: #dc3545; transition: all 0.2s;">👎 Not interested</button>
+                </div>
+                <p id="interest-feedback" style="display: none; margin: 12px 0 0 0; font-size: 14px; color: #155724; font-weight: 500;"></p>
+            </div>
+
             <div class="info-message">
                 <strong>Note:</strong> This demo link is valid for 60 minutes. You can refresh and replay the video during this time.
                 <?php if (defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)): ?>
@@ -358,6 +437,14 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             cursor: not-allowed;
         }
         
+        .interest-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+        .interest-btn:disabled {
+            cursor: not-allowed;
+            opacity: 0.7;
+        }
         /* Hide Vimeo player buttons */
         .video-wrapper {
             overflow: hidden;
@@ -371,6 +458,30 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
         /* This will be injected into iframe if possible */
     </style>
     <script>
+        // Mobile device notice: suggest Desktop/Laptop for better performance
+        (function() {
+            function isMobileDevice() {
+                var ua = navigator.userAgent || navigator.vendor || '';
+                var mobile = /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini|Mobile|mobile|CriOS|FxiOS/i.test(ua);
+                var small = typeof window.matchMedia !== 'undefined' && window.matchMedia('(max-width: 768px)').matches;
+                return mobile || small;
+            }
+            var notice = document.getElementById('mobile-notice');
+            var dismissBtn = document.getElementById('mobile-notice-dismiss');
+            if (notice && isMobileDevice()) {
+                try {
+                    if (sessionStorage.getItem('mobile-notice-dismissed')) return;
+                } catch (e) {}
+                notice.classList.add('is-visible');
+                if (dismissBtn) {
+                    dismissBtn.addEventListener('click', function() {
+                        notice.classList.remove('is-visible');
+                        try { sessionStorage.setItem('mobile-notice-dismissed', '1'); } catch (e) {}
+                    });
+                }
+            }
+        })();
+
         (function() {
             const iframe = document.getElementById('vimeoPlayer');
             
@@ -806,6 +917,62 @@ iframe.addEventListener('load', function() {
                     e.preventDefault();
                     sendQuery();
                 }
+            });
+        })();
+
+        // Interest (Interested / Not interested) buttons
+        (function() {
+            const section = document.getElementById('interest-section');
+            const buttons = document.querySelectorAll('.interest-btn');
+            const feedback = document.getElementById('interest-feedback');
+            const buttonsWrap = document.getElementById('interest-buttons');
+            const token = '<?php echo htmlspecialchars($token, ENT_QUOTES, 'UTF-8'); ?>';
+            const initial = (section && section.getAttribute('data-initial-interest')) || '';
+
+            function setSelected(value) {
+                buttons.forEach(function(btn) {
+                    btn.disabled = true;
+                });
+                if (buttonsWrap) buttonsWrap.style.display = 'none';
+                if (feedback) {
+                    feedback.style.display = 'block';
+                    feedback.textContent = 'You selected: ' + (value === 'interested' ? '👍 Interested' : '👎 Not interested');
+                    feedback.style.color = value === 'interested' ? '#155724' : '#721c24';
+                }
+            }
+
+            if (initial === 'interested' || initial === 'not_interested') {
+                setSelected(initial);
+                return;
+            }
+
+            buttons.forEach(function(btn) {
+                btn.addEventListener('click', function() {
+                    const interest = btn.getAttribute('data-interest');
+                    if (!interest || !token) return;
+                    btn.disabled = true;
+                    buttons.forEach(function(b) { b.disabled = true; });
+
+                    const formData = new FormData();
+                    formData.append('token', token);
+                    formData.append('interest', interest);
+
+                    fetch('../api/save-interest.php', { method: 'POST', body: formData })
+                        .then(function(r) { return r.json(); })
+                        .then(function(data) {
+                            if (data.success) {
+                                setSelected(interest);
+                            } else {
+                                alert('Error: ' + (data.message || 'Could not save.'));
+                                buttons.forEach(function(b) { b.disabled = false; });
+                            }
+                        })
+                        .catch(function(err) {
+                            console.error(err);
+                            alert('An error occurred. Please try again.');
+                            buttons.forEach(function(b) { b.disabled = false; });
+                        });
+                });
             });
         })();
     </script>

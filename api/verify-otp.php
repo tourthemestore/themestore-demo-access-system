@@ -30,9 +30,9 @@ function findLeadByEmail(PDO $pdo, string $email): ?array
 function getLatestPendingOtp(PDO $pdo, int $leadId): ?array
 {
     $stmt = $pdo->prepare("
-        SELECT id, otp_hash, attempts, max_attempts, status, expires_at, verified_at
+        SELECT id, otp_hash, attempts, max_attempts, status, expires_at, verified_at, created_at
         FROM otp_verifications
-        WHERE lead_id = ? 
+        WHERE lead_id = ?
         AND status IN ('pending', 'failed')
         ORDER BY created_at DESC
         LIMIT 1
@@ -42,11 +42,21 @@ function getLatestPendingOtp(PDO $pdo, int $leadId): ?array
 }
 
 /**
- * Check if OTP is expired
+ * Check if OTP is expired using created_at + 10 minutes.
+ * We use created_at (never updated) and PHP time() to avoid any
+ * datetime parsing / timezone mismatch that could wrongly mark valid OTPs expired.
  */
-function isOtpExpired(string $expiresAt): bool
+function isOtpExpired(string $createdAt): bool
 {
-    return strtotime($expiresAt) < time();
+    $createdAt = trim($createdAt ?? '');
+    if ($createdAt === '') {
+        return true;
+    }
+    $createdTs = @strtotime($createdAt);
+    if ($createdTs === false) {
+        return true;
+    }
+    return time() > $createdTs + 600;
 }
 
 /**
@@ -214,8 +224,8 @@ try {
         exit;
     }
     
-    // Check if OTP is expired
-    if (isOtpExpired($otpRecord['expires_at'])) {
+    // Check if OTP is expired (created_at + 10 min; same OTP, retries don't change it)
+    if (isOtpExpired($otpRecord['created_at'] ?? '')) {
         // Update status to expired
         $stmt = $pdo->prepare("
             UPDATE otp_verifications
