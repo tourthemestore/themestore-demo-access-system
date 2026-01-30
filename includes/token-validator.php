@@ -10,6 +10,23 @@
 require_once __DIR__ . '/../config/config.php';
 
 /**
+ * Check if demo link is expired (created_at + 60 minutes).
+ * Uses created_at and time() to avoid datetime parsing / timezone issues.
+ */
+function isDemoLinkExpired(string $createdAt): bool
+{
+    $createdAt = trim($createdAt ?? '');
+    if ($createdAt === '') {
+        return true;
+    }
+    $createdTs = @strtotime($createdAt);
+    if ($createdTs === false) {
+        return true;
+    }
+    return time() > $createdTs + 3600; // 60 minutes
+}
+
+/**
  * Validate demo token
  * 
  * @param string $token The token to validate
@@ -36,13 +53,8 @@ function validateDemoToken(string $token): array|false
         $stmt->execute([$token]);
         $demoLink = $stmt->fetch();
         
-        if ($demoLink) {
-            // Check expiry in PHP (more reliable than MySQL NOW() comparison)
-            $expiresTs = strtotime($demoLink['expires_at']);
-            $nowTs = time();
-            if ($expiresTs > $nowTs) {
-                return $demoLink;
-            }
+        if ($demoLink && !isDemoLinkExpired($demoLink['created_at'] ?? '')) {
+            return $demoLink;
         }
         
         // Fallback: Try hash verification
@@ -56,12 +68,8 @@ function validateDemoToken(string $token): array|false
         $demoLinks = $stmt->fetchAll();
         
         foreach ($demoLinks as $demoLink) {
-            if (password_verify($token, $demoLink['token_hash'])) {
-                $expiresTs = strtotime($demoLink['expires_at']);
-                $nowTs = time();
-                if ($expiresTs > $nowTs) {
-                    return $demoLink;
-                }
+            if (password_verify($token, $demoLink['token_hash']) && !isDemoLinkExpired($demoLink['created_at'] ?? '')) {
+                return $demoLink;
             }
         }
         

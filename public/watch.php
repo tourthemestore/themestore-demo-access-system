@@ -344,7 +344,7 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
 
             <!-- Interest selection (Interested / Not interested) -->
             <div id="interest-section" data-initial-interest="<?php echo $leadInterest ? htmlspecialchars($leadInterest, ENT_QUOTES, 'UTF-8') : ''; ?>" style="margin-bottom: 20px; padding: 20px; background: #f8f9fa; border-radius: 8px; border: 1px solid #e9ecef;">
-                <p style="margin: 0 0 12px 0; font-weight: 600; color: #333; font-size: 15px;">Are you interested in our demo?</p>
+                <p style="margin: 0 0 12px 0; font-weight: 600; color: #333; font-size: 15px;">Did the demo meet your expectations to move forward?</p>
                 <div id="interest-buttons" style="display: flex; gap: 12px; flex-wrap: wrap;">
                     <button type="button" id="btn-interested" class="interest-btn" data-interest="interested" style="padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; border: 2px solid #28a745; background: #fff; color: #28a745; transition: all 0.2s;">👍 Interested</button>
                     <button type="button" id="btn-not-interested" class="interest-btn" data-interest="not_interested" style="padding: 12px 24px; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; border: 2px solid #dc3545; background: #fff; color: #dc3545; transition: all 0.2s;">👎 Not interested</button>
