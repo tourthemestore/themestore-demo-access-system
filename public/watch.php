@@ -327,19 +327,6 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                     <p style="font-size: 18px; margin-bottom: 10px;">Video unavailable</p>
                     <p style="font-size: 14px;">Please check Vimeo video settings to allow embedding</p>
                 </div>
-                <?php if ($vimeoPassword): ?>
-                <!-- Password Entry Overlay (Fallback if Vimeo doesn't prompt) -->
-                <div id="password-overlay" style="display: none; position: absolute; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.95); z-index: 1000; display: flex; align-items: center; justify-content: center; flex-direction: column;">
-                    <div style="background: white; padding: 30px; border-radius: 12px; max-width: 400px; width: 90%; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.3);">
-                        <h3 style="margin: 0 0 15px 0; color: #333; font-size: 20px;">🔒 Video Password Required</h3>
-                        <p style="margin: 0 0 20px 0; color: #666; font-size: 14px;">Please enter the password you received in your email to unlock the video.</p>
-                        <input type="password" id="manual-password-input" placeholder="Enter video password" style="width: 100%; padding: 12px; border: 2px solid #ddd; border-radius: 6px; font-size: 16px; margin-bottom: 15px; box-sizing: border-box;">
-                        <button id="submit-password-btn" style="width: 100%; padding: 12px; background: #667eea; color: white; border: none; border-radius: 6px; font-size: 16px; font-weight: 600; cursor: pointer; margin-bottom: 10px;">Unlock Video</button>
-                        <p id="password-error" style="margin: 10px 0 0 0; color: #e74c3c; font-size: 13px; display: none;">Incorrect password. Please try again.</p>
-                        <p style="margin: 15px 0 0 0; color: #999; font-size: 12px;">Check your OTP email for the password</p>
-                    </div>
-                </div>
-                <?php endif; ?>
             </div>
 
             <!-- Interest selection (Interested / Not interested) -->
@@ -497,7 +484,6 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             let viewTracked = false;
             let progressTrackingInterval = null;
             let lastTrackedProgress = 0;
-            const vimeoPassword = <?php echo $vimeoPassword ? json_encode($vimeoPassword) : 'null'; ?>;
             
             function initializePlayer() {
                 if (playerInitialized) return;
@@ -547,153 +533,7 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                     return;
                 }
                 
-                setupPasswordHandling();
                 setupVideoTracking();
-            }
-            
-            function setupPasswordHandling() {
-                if (!player || !vimeoPassword) return;
-                
-                // Handle password-protected video
-                let passwordPromptDetected = false;
-                let passwordOverlayShown = false;
-                let videoUnlocked = false;
-                const passwordOverlay = document.getElementById('password-overlay');
-                const manualPasswordInput = document.getElementById('manual-password-input');
-                const submitPasswordBtn = document.getElementById('submit-password-btn');
-                const passwordError = document.getElementById('password-error');
-                
-                // Function to show manual password overlay
-                function showPasswordOverlay() {
-                    if (passwordOverlay && !passwordOverlayShown && !videoUnlocked) {
-                        passwordOverlayShown = true;
-                        passwordOverlay.style.display = 'flex';
-                        if (manualPasswordInput) {
-                            manualPasswordInput.focus();
-                        }
-                    }
-                }
-                
-                // Function to hide password overlay
-                function hidePasswordOverlay() {
-                    if (passwordOverlay) {
-                        passwordOverlay.style.display = 'none';
-                    }
-                }
-                
-                // Check if video is actually password-protected
-                // Note: Vimeo password protection may still allow getDuration() to work
-                // So we use a more lenient approach - only show password form if needed
-                function checkPasswordProtection() {
-                    if (!player) return;
-                    
-                    // Wait a bit for Vimeo's password prompt to appear naturally
-                    setTimeout(function() {
-                        // Check if player is ready and try to detect password prompt
-                        if (player) {
-                            player.ready().then(function() {
-                                // Try to play the video - if password is required, Vimeo will show prompt
-                                // We'll just wait and see if user needs to enter password
-                                setTimeout(function() {
-                                    // If no password prompt detected by now, show our helper form
-                                    // But don't show warning - Vimeo might handle it differently
-                                    if (!passwordPromptDetected && !videoUnlocked) {
-                                        // Only show password form, not the warning
-                                        // Vimeo will handle password entry if protection is active
-                                        console.log('Password configured - Vimeo will prompt if protection is active');
-                                    }
-                                }, 5000);
-                            }).catch(function(error) {
-                                console.log('Player ready error:', error);
-                            });
-                        }
-                    }, 2000);
-                }
-                
-                // Don't auto-check aggressively - let Vimeo handle password prompts naturally
-                // Only show our password form as a fallback helper
-                checkPasswordProtection();
-                
-                // Monitor for Vimeo's password prompt in iframe (may be blocked by CORS)
-                let checkCount = 0;
-                let checkPasswordPrompt = setInterval(function() {
-                    checkCount++;
-                    try {
-                        const iframeDoc = iframe.contentDocument || iframe.contentWindow.document;
-                        const passwordInput = iframeDoc.querySelector('input[type="password"]');
-                        
-                        if (passwordInput) {
-                            passwordPromptDetected = true;
-                            clearInterval(checkPasswordPrompt);
-                            console.log('Vimeo password prompt detected');
-                            // Don't show manual overlay if Vimeo is handling it
-                            hidePasswordOverlay();
-                        }
-                    } catch(e) {
-                        // Cross-origin - expected, can't access iframe content
-                    }
-                    
-                    // After 5 seconds, if no Vimeo prompt detected, show manual entry
-                    if (checkCount >= 5 && !passwordPromptDetected) {
-                        clearInterval(checkPasswordPrompt);
-                        showPasswordOverlay();
-                    }
-                }, 1000);
-                
-                // Manual password submission
-                function submitManualPassword() {
-                    const enteredPassword = manualPasswordInput ? manualPasswordInput.value.trim() : '';
-                    
-                    if (!enteredPassword) {
-                        if (passwordError) {
-                            passwordError.textContent = 'Please enter the password';
-                            passwordError.style.display = 'block';
-                        }
-                        return;
-                    }
-                    
-                    if (enteredPassword === vimeoPassword) {
-                        // Correct password entered - hide overlay and let user play
-                        if (passwordError) {
-                            passwordError.style.display = 'none';
-                        }
-                        
-                        videoUnlocked = true;
-                        hidePasswordOverlay();
-                        
-                        // Note: If Vimeo password protection is active, Vimeo will prompt for password when user tries to play
-                        // The password they entered here matches what they need to enter in Vimeo's prompt
-                        console.log('Password verified. If Vimeo shows a password prompt, use the same password.');
-                    } else {
-                        // Wrong password
-                        if (passwordError) {
-                            passwordError.textContent = 'Incorrect password. Please check your OTP email and try again.';
-                            passwordError.style.display = 'block';
-                        }
-                        if (manualPasswordInput) {
-                            manualPasswordInput.value = '';
-                            manualPasswordInput.focus();
-                        }
-                    }
-                }
-                
-                // Event listeners for manual password entry
-                if (submitPasswordBtn) {
-                    submitPasswordBtn.addEventListener('click', submitManualPassword);
-                }
-                
-                if (manualPasswordInput) {
-                    manualPasswordInput.addEventListener('keypress', function(e) {
-                        if (e.key === 'Enter') {
-                            submitManualPassword();
-                        }
-                    });
-                }
-                
-                // Clear interval after 30 seconds
-                setTimeout(function() {
-                    clearInterval(checkPasswordPrompt);
-                }, 30000);
             }
             
             function setupVideoTracking() {
