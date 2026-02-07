@@ -34,26 +34,6 @@ function getLeadInfo(int $leadId): ?array
 }
 
 /**
- * Get OTP verification history
- */
-function getOtpHistory(int $leadId): array
-{
-    try {
-        $pdo = getDbConnection();
-        $stmt = $pdo->prepare("
-            SELECT * FROM otp_verifications
-            WHERE lead_id = ?
-            ORDER BY created_at DESC
-        ");
-        $stmt->execute([$leadId]);
-        return $stmt->fetchAll();
-    } catch (PDOException $e) {
-        error_log("Database error in admin-lead-detail.php: " . $e->getMessage());
-        return [];
-    }
-}
-
-/**
  * Get demo links for lead
  */
 function getDemoLinks(int $leadId): array
@@ -162,34 +142,9 @@ function getQueries(int $leadId): array
 /**
  * Build activity timeline
  */
-function buildActivityTimeline(array $otpHistory, array $demoLinks, array $videoActivity, array $followups = [], array $queries = []): array
+function buildActivityTimeline(array $demoLinks, array $videoActivity, array $followups = [], array $queries = []): array
 {
     $timeline = [];
-    
-    // Add OTP events
-    foreach ($otpHistory as $otp) {
-        $timeline[] = [
-            'type' => 'otp',
-            'timestamp' => strtotime($otp['created_at']),
-            'date' => $otp['created_at'],
-            'title' => 'OTP Sent',
-            'description' => 'OTP code sent to email',
-            'status' => $otp['status'],
-            'data' => $otp
-        ];
-        
-        if ($otp['verified_at']) {
-            $timeline[] = [
-                'type' => 'otp_verified',
-                'timestamp' => strtotime($otp['verified_at']),
-                'date' => $otp['verified_at'],
-                'title' => 'OTP Verified',
-                'description' => 'OTP successfully verified',
-                'status' => 'verified',
-                'data' => $otp
-            ];
-        }
-    }
     
     // Add demo link events
     foreach ($demoLinks as $demo) {
@@ -355,12 +310,11 @@ if (!$lead) {
     die('Lead not found');
 }
 
-$otpHistory = getOtpHistory($leadId);
 $demoLinks = getDemoLinks($leadId);
 $videoActivity = getVideoActivity($leadId);
 $followups = getFollowups($leadId);
 $queries = getQueries($leadId);
-$timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $followups, $queries);
+$timeline = buildActivityTimeline($demoLinks, $videoActivity, $followups, $queries);
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -511,8 +465,6 @@ $timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $foll
             border: 2px solid white;
             box-shadow: 0 0 0 2px #667eea;
         }
-        .timeline-item.otp::before { background: #17a2b8; box-shadow: 0 0 0 2px #17a2b8; }
-        .timeline-item.otp_verified::before { background: #28a745; box-shadow: 0 0 0 2px #28a745; }
         .timeline-item.demo_link::before { background: #667eea; box-shadow: 0 0 0 2px #667eea; }
         .timeline-item.demo_accessed::before { background: #ffc107; box-shadow: 0 0 0 2px #ffc107; }
         .timeline-item.video_started::before { background: #17a2b8; box-shadow: 0 0 0 2px #17a2b8; }
@@ -618,39 +570,6 @@ $timeline = buildActivityTimeline($otpHistory, $demoLinks, $videoActivity, $foll
                     <span class="info-value"><?php echo formatDbDateTime($lead['updated_at']); ?></span>
                 </div>
             </div>
-        </div>
-
-        <!-- OTP Verification History -->
-        <div class="card">
-            <h2>OTP Verification History</h2>
-            <?php if (empty($otpHistory)): ?>
-                <div class="no-data">No OTP verification attempts found.</div>
-            <?php else: ?>
-                <table>
-                    <thead>
-                        <tr>
-                            <th>ID</th>
-                            <th>Status</th>
-                            <th>Attempts</th>
-                            <th>Expires At</th>
-                            <th>Verified At</th>
-                            <th>Created At</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        <?php foreach ($otpHistory as $otp): ?>
-                            <tr>
-                                <td><?php echo $otp['id']; ?></td>
-                                <td><?php echo formatStatusBadge($otp['status']); ?></td>
-                                <td><?php echo $otp['attempts']; ?> / <?php echo $otp['max_attempts']; ?></td>
-                                <td><?php echo formatDbDateTime($otp['expires_at']); ?></td>
-                                <td><?php echo $otp['verified_at'] ? formatDbDateTime($otp['verified_at']) : 'N/A'; ?></td>
-                                <td><?php echo formatDbDateTime($otp['created_at']); ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    </tbody>
-                </table>
-            <?php endif; ?>
         </div>
 
         <!-- Demo Links -->

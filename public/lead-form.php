@@ -42,6 +42,107 @@ function sanitizeInput(string $data): string
     return htmlspecialchars(trim($data), ENT_QUOTES, 'UTF-8');
 }
 
+// Load PHPMailer if available
+$phpmailerAvailable = false;
+$vendorPath = __DIR__ . '/../vendor/autoload.php';
+if (file_exists($vendorPath)) {
+    try {
+        require_once $vendorPath;
+        if (class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+            $phpmailerAvailable = true;
+        }
+    } catch (Exception $e) {
+        error_log("PHPMailer autoload failed: " . $e->getMessage());
+    }
+}
+
+/**
+ * Send email with demo link + video password (replaces OTP email)
+ */
+function sendDemoLinkEmail(string $email, string $name, string $demoUrl): bool
+{
+    global $phpmailerAvailable;
+
+    $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD) ? VIMEO_VIDEO_PASSWORD : null;
+
+    $subject = 'Your ThemeStore Demo Access Link';
+
+    $passwordSection = '';
+    if ($vimeoPassword) {
+        $passwordSection = "
+            <div style='background: #fff3cd; border: 2px solid #ffc107; border-radius: 8px; padding: 20px; margin: 20px 0;'>
+                <h3 style='color: #856404; margin-top: 0;'>🔒 Video Password</h3>
+                <p style='color: #856404; margin-bottom: 10px;'>The demo video is password-protected. Enter this password when the video player prompts you.</p>
+                <div style='background: #fff; border: 2px dashed #ffc107; padding: 15px; text-align: center; margin: 15px 0; border-radius: 6px;'>
+                    <p style='margin: 0; color: #856404; font-size: 14px; font-weight: bold;'>Video Password:</p>
+                    <p style='margin: 5px 0 0 0; font-size: 24px; font-weight: bold; color: #667eea; letter-spacing: 3px;'>" . htmlspecialchars($vimeoPassword, ENT_QUOTES, 'UTF-8') . "</p>
+                </div>
+            </div>";
+    }
+
+    $htmlBody = "
+        <html>
+        <head>
+            <style>
+                body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; }
+                .container { max-width: 600px; margin: 0 auto; padding: 20px; }
+            </style>
+        </head>
+        <body>
+            <div class='container'>
+                <h2>Your Demo Access Link</h2>
+                <p>Hello " . htmlspecialchars($name, ENT_QUOTES, 'UTF-8') . ",</p>
+                <p>Thank you for your interest in ThemeStore. Here is your demo access link:</p>
+                <div style='background: #f4f4f4; border: 2px dashed #667eea; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px;'>
+                    <a href='" . htmlspecialchars($demoUrl, ENT_QUOTES, 'UTF-8') . "' style='color: #667eea; font-size: 16px; font-weight: bold; word-break: break-all;'>Click here to watch the demo</a>
+                </div>
+                <p><strong>Note:</strong> This link is valid for <strong>60 minutes</strong> and can be used up to <strong>2 times</strong>.</p>
+                {$passwordSection}
+                <p>If you did not request this, please ignore this email.</p>
+                <hr>
+                <p style='font-size: 12px; color: #666;'>This is an automated message. Please do not reply to this email.</p>
+            </div>
+        </body>
+        </html>";
+
+    $textBody = "Hello {$name},\n\nYour ThemeStore demo access link: {$demoUrl}\n\nThis link is valid for 60 minutes and can be used up to 2 times.";
+    if ($vimeoPassword) {
+        $textBody .= "\n\nVideo Password: {$vimeoPassword}\nEnter this password when the video player prompts you.";
+    }
+
+    if ($phpmailerAvailable) {
+        try {
+            $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+            $mail->isSMTP();
+            $mail->Host = SMTP_HOST;
+            $mail->SMTPAuth = true;
+            $mail->Username = SMTP_USER;
+            $mail->Password = SMTP_PASS;
+            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->Port = SMTP_PORT;
+            $mail->CharSet = 'UTF-8';
+            $mail->SMTPDebug = 0;
+            $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
+            $mail->addAddress($email, $name);
+            $mail->isHTML(true);
+            $mail->Subject = $subject;
+            $mail->Body = $htmlBody;
+            $mail->AltBody = $textBody;
+            $mail->send();
+            error_log("Demo link email sent to: {$email}");
+            return true;
+        } catch (\Exception $e) {
+            error_log("PHPMailer error sending demo link email: " . ($mail->ErrorInfo ?? $e->getMessage()));
+        }
+    }
+
+    // Fallback to PHP mail()
+    $headers = "MIME-Version: 1.0\r\n";
+    $headers .= "Content-type: text/html; charset=UTF-8\r\n";
+    $headers .= "From: " . SMTP_FROM_NAME . " <" . SMTP_FROM_EMAIL . ">\r\n";
+    return mail($email, $subject, $htmlBody, $headers);
+}
+
 // Initialize variables
 $errors = [];
 $success = false;
@@ -107,15 +208,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo = getDbConnection();
 
                 // Check if email already exists
-                $stmt = $pdo->prepare("SELECT id FROM leads_for_demo WHERE email = ?");
+                $stmt = $pdo->prepare("SELECT id, status FROM leads_for_demo WHERE email = ?");
                 $stmt->execute([$formData['email']]);
-                if ($stmt->fetch()) {
-                    $errors[] = 'This email address is already registered.';
+                $existingLead = $stmt->fetch();
+                if ($existingLead) {
+                    // Already registered — redirect to demo flow
+                    $_SESSION['lead_email'] = $formData['email'];
+                    header("Location: demo-flow.php?email=" . urlencode($formData['email']));
+                    exit;
                 } else {
-                    // Insert lead with prepared statement
+                    // Insert lead as verified (no OTP step)
                     $stmt = $pdo->prepare("
                         INSERT INTO leads_for_demo (company_name, location, email, mobile, campaign_source, status)
-                        VALUES (?, ?, ?, ?, ?, 'pending')
+                        VALUES (?, ?, ?, ?, ?, 'verified')
                     ");
                     $stmt->execute([
                         $formData['company_name'],
@@ -124,6 +229,27 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $formData['mobile'],
                         $formData['campaign_source'] ?: null
                     ]);
+
+                    $newLeadId = (int) $pdo->lastInsertId();
+
+                    // Auto-generate demo link
+                    require_once __DIR__ . '/../includes/demo-link-generator.php';
+                    $token = generateSecureToken(64);
+                    $tokenHash = hashToken($token);
+                    createDemoLink($pdo, $newLeadId, $token, $tokenHash, 1);
+
+                    // Build demo watch URL
+                    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+                    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+                    $basePath = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+                    $demoUrl = $protocol . '://' . $host . $basePath . '/watch.php?token=' . urlencode($token);
+
+                    // Send email with demo link + video password
+                    sendDemoLinkEmail(
+                        $formData['email'],
+                        $formData['company_name'],
+                        $demoUrl
+                    );
 
                     $success = true;
                     // Store email in session for demo flow
@@ -270,8 +396,8 @@ $csrfToken = generateCsrfToken();
 
         <?php if ($success): ?>
             <div class="success-message">
-                Thank you! Your information has been submitted successfully.<br>
-                Redirecting to verification...
+                Thank you! Your demo access link has been sent to your email.<br>
+                Redirecting to your demo...
             </div>
         <?php endif; ?>
 

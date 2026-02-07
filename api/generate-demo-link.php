@@ -164,14 +164,9 @@ try {
     
     $foundLeadId = (int) $lead['id'];
     
-    // Check if lead is verified
-    if ($lead['status'] !== 'verified') {
-        http_response_code(400);
-        echo json_encode([
-            'success' => false,
-            'message' => 'Lead must be verified before generating demo link. Please verify OTP first.'
-        ]);
-        exit;
+    // Auto-verify if still pending (OTP no longer required)
+    if ($lead['status'] === 'pending') {
+        $pdo->prepare("UPDATE leads_for_demo SET status = 'verified', updated_at = NOW() WHERE id = ?")->execute([$foundLeadId]);
     }
     
     // Check if lead has a rescheduled follow-up
@@ -226,7 +221,7 @@ try {
             'video_url' => VIMEO_EMBED_URL,
             'expires_at' => date('Y-m-d H:i:s', time() + 3600), // 60 minutes from now
             'expires_in' => 3600, // 60 minutes in seconds
-            'max_views' => 1
+            'max_views' => 2
         ]
     ]);
     

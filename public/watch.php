@@ -340,11 +340,11 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             </div>
 
             <div class="info-message">
-                <strong>Note:</strong> This demo link is valid for 60 minutes. You can refresh and replay the video during this time.
+                <strong>Note:</strong> This demo link is valid for 60 minutes and can be used up to 2 times.
                 <?php if (defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)): ?>
                     <br><br>
                     <strong style="color: #856404;">🔒 Video Password:</strong> The video is password-protected. 
-                    You should have received the password in your OTP email. 
+                    Check your email for the password. 
                     <br><span style="font-size: 12px; color: #666;">Enter the password when prompted by the video player.</span>
                 <?php endif; ?>
             </div>
