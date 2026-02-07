@@ -21,7 +21,7 @@ if (empty($email)) {
 $lead = null;
 try {
     $pdo = getDbConnection();
-    $stmt = $pdo->prepare("SELECT id, email, company_name, status FROM leads_for_demo WHERE email = ? LIMIT 1");
+    $stmt = $pdo->prepare("SELECT id, email, company_name, status, view_count FROM leads_for_demo WHERE email = ? LIMIT 1");
     $stmt->execute([$email]);
     $lead = $stmt->fetch();
 } catch (Exception $e) {
@@ -70,46 +70,53 @@ try {
     $isRescheduled = false;
 }
 
+// Check view_count on lead (limit: 2 per email)
+$maxAllowedViews = 2;
+$totalViews = (int) ($lead['view_count'] ?? 0);
+$viewsExhausted = ($totalViews >= $maxAllowedViews);
+
 // Check for active demo link or generate one
 $demoToken = null;
 $currentStep = 'generate_demo';
 
-$stmt = $pdo->prepare("
-    SELECT id, token, status, expires_at, created_at
-    FROM demo_links
-    WHERE lead_id = ?
-      AND status = 'active'
-    ORDER BY created_at DESC
-    LIMIT 1
-");
-$stmt->execute([$leadId]);
-$demoLink = $stmt->fetch();
+if (!$viewsExhausted) {
+    $stmt = $pdo->prepare("
+        SELECT id, token, status, expires_at, created_at
+        FROM demo_links
+        WHERE lead_id = ?
+          AND status = 'active'
+        ORDER BY created_at DESC
+        LIMIT 1
+    ");
+    $stmt->execute([$leadId]);
+    $demoLink = $stmt->fetch();
 
-// Check if existing link is still valid (created_at + 60 min)
-if ($demoLink) {
-    $createdTs = @strtotime($demoLink['created_at']);
-    $isValid = ($createdTs !== false && time() <= $createdTs + 3600);
-    if ($isValid && !$isRescheduled) {
-        $currentStep = 'demo';
-        $demoToken = $demoLink['token'];
+    // Check if existing link is still valid (created_at + 60 min)
+    if ($demoLink) {
+        $createdTs = @strtotime($demoLink['created_at']);
+        $isValid = ($createdTs !== false && time() <= $createdTs + 3600);
+        if ($isValid && !$isRescheduled) {
+            $currentStep = 'demo';
+            $demoToken = $demoLink['token'];
+        }
     }
-}
 
-if ($currentStep !== 'demo') {
-    // Auto-generate a new demo link
-    if ($isRescheduled && $demoLink) {
-        // Invalidate old links
-        $pdo->prepare("UPDATE demo_links SET status = 'expired' WHERE lead_id = ? AND status = 'active'")->execute([$leadId]);
-    }
-    try {
-        $token = generateSecureToken(64);
-        $tokenHash = hashToken($token);
-        createDemoLink($pdo, $leadId, $token, $tokenHash, 1);
-        $currentStep = 'demo';
-        $demoToken = $token;
-    } catch (Exception $e) {
-        error_log("Auto-generate demo link failed in demo-flow.php: " . $e->getMessage());
-        $currentStep = 'generate_demo';
+    if ($currentStep !== 'demo') {
+        // Auto-generate a new demo link
+        if ($isRescheduled && $demoLink) {
+            // Invalidate old links
+            $pdo->prepare("UPDATE demo_links SET status = 'expired' WHERE lead_id = ? AND status = 'active'")->execute([$leadId]);
+        }
+        try {
+            $token = generateSecureToken(64);
+            $tokenHash = hashToken($token);
+            createDemoLink($pdo, $leadId, $token, $tokenHash, 1);
+            $currentStep = 'demo';
+            $demoToken = $token;
+        } catch (Exception $e) {
+            error_log("Auto-generate demo link failed in demo-flow.php: " . $e->getMessage());
+            $currentStep = 'generate_demo';
+        }
     }
 }
 ?>
@@ -166,7 +173,14 @@ if ($currentStep !== 'demo') {
             </div>
         <?php endif; ?>
 
-        <?php if ($currentStep === 'demo' && $demoToken): ?>
+        <?php if ($viewsExhausted): ?>
+            <div class="message info" style="background: #f8d7da; border-color: #f5c6cb; color: #721c24;">
+                <strong>Demo Access Limit Reached</strong><br><br>
+                You have already used your <?php echo $maxAllowedViews; ?> allowed demo views for this email address.
+                <br><br>
+                If you need additional access, please contact our support team.
+            </div>
+        <?php elseif ($currentStep === 'demo' && $demoToken): ?>
             <div class="demo-link-box">
                 <p style="font-weight: 600; margin-bottom: 10px;">Your Demo Link is Ready!</p>
                 <div class="demo-link" id="demo-url"><?php echo htmlspecialchars('public/watch.php?token=' . $demoToken, ENT_QUOTES, 'UTF-8'); ?></div>
@@ -175,6 +189,10 @@ if ($currentStep !== 'demo') {
             </div>
             <div class="message info">
                 This link is valid for <strong>60 minutes</strong> and can be used up to <strong>2 times</strong>.
+                <?php $remainingViews = $maxAllowedViews - $totalViews; ?>
+                <?php if ($remainingViews < $maxAllowedViews): ?>
+                    <br>You have <strong><?php echo $remainingViews; ?></strong> view(s) remaining.
+                <?php endif; ?>
                 <?php if (defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)): ?>
                     <br><br>
                     <strong>🔒 Video Password:</strong> The video is password-protected. Check your email for the password.

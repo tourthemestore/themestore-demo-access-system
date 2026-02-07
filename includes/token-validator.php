@@ -3,7 +3,8 @@
  * Token Validator - ThemeStore Demo Access System
  * PHP 8 - No Framework
  * 
- * Validates demo access tokens
+ * Validates demo access tokens (only checks time expiry).
+ * View-count limiting is handled at the lead level (leads_for_demo.view_count).
  */
 
 // Load configuration
@@ -28,6 +29,9 @@ function isDemoLinkExpired(string $createdAt): bool
 
 /**
  * Validate demo token
+ * 
+ * Only checks: token exists + not time-expired.
+ * View-count check is done separately using leads_for_demo.view_count.
  * 
  * @param string $token The token to validate
  * @return array|false Returns demo link row if valid, false otherwise
@@ -83,4 +87,3 @@ function validateDemoToken(string $token): array|false
         return false;
     }
 }
-

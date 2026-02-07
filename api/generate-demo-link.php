@@ -169,6 +169,20 @@ try {
         $pdo->prepare("UPDATE leads_for_demo SET status = 'verified', updated_at = NOW() WHERE id = ?")->execute([$foundLeadId]);
     }
     
+    // Check view_count on lead record (limit: 2 per email)
+    $vcStmt = $pdo->prepare("SELECT view_count FROM leads_for_demo WHERE id = ? LIMIT 1");
+    $vcStmt->execute([$foundLeadId]);
+    $leadViewCount = (int) $vcStmt->fetchColumn();
+    
+    if ($leadViewCount >= 2) {
+        http_response_code(403);
+        echo json_encode([
+            'success' => false,
+            'message' => 'Demo access limit reached. This email has already used the maximum allowed demo views (2).'
+        ]);
+        exit;
+    }
+    
     // Check if lead has a rescheduled follow-up
     $isRescheduled = hasRescheduledFollowup($pdo, $foundLeadId);
     

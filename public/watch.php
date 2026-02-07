@@ -4,64 +4,15 @@
  * PHP 8 - No Framework
  * 
  * Validates token and displays video player
- * Tracks video activity and increments views on first play
+ * Uses leads_for_demo.view_count for 2-view-per-email limit
+ * Session prevents page refreshes from double-counting
  */
+
+session_start();
 
 // Load required files
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/token-validator.php';
-
-/**
- * Increment demo link views on first play
- */
-function incrementDemoLinkViews(int $demoLinkId): bool
-{
-    try {
-        $pdo = getDbConnection();
-        
-        // Check current views
-        $checkStmt = $pdo->prepare("
-            SELECT views_count, max_views
-            FROM demo_links
-            WHERE id = ?
-        ");
-        $checkStmt->execute([$demoLinkId]);
-        $link = $checkStmt->fetch();
-        
-        if (!$link) {
-            return false;
-        }
-        
-        // Only increment if not at max views
-        if ($link['views_count'] < $link['max_views']) {
-            $stmt = $pdo->prepare("
-                UPDATE demo_links
-                SET views_count = views_count + 1,
-                    accessed_at = NOW(),
-                    updated_at = NOW()
-                WHERE id = ?
-            ");
-            $stmt->execute([$demoLinkId]);
-            
-            // Check if max views reached
-            if (($link['views_count'] + 1) >= $link['max_views']) {
-                $updateStmt = $pdo->prepare("
-                    UPDATE demo_links
-                    SET status = 'used', updated_at = NOW()
-                    WHERE id = ?
-                ");
-                $updateStmt->execute([$demoLinkId]);
-            }
-            
-            return true;
-        }
-        
-        return false;
-    } catch (PDOException $e) {
-        error_log("Database error in incrementDemoLinkViews: " . $e->getMessage());
-        return false;
-    }
-}
 
 // Get token from URL (PHP automatically decodes $_GET, just trim)
 $token = trim($_GET['token'] ?? '');
@@ -78,40 +29,40 @@ if (empty($token)) {
     $demoLink = validateDemoToken($token);
     
     if ($demoLink === false) {
-        // Check if token exists but is expired or used
+        // Token invalid (time-expired or not found) — determine reason
+        $isExpired = true;
+        $errorMessage = 'Your demo access has expired or the link is no longer valid. Please request a new demo link.';
+    } else {
+        // Token is valid (not time-expired). Now check lead's view_count.
+        $leadId = (int) $demoLink['lead_id'];
         try {
             $pdo = getDbConnection();
-            $stmt = $pdo->prepare("
-                SELECT status, expires_at, views_count, max_views
-                FROM demo_links
-                WHERE token_hash = ?
-                ORDER BY created_at DESC
-                LIMIT 1
-            ");
-            
-            // We need to check all tokens to find the matching one
-            $allStmt = $pdo->prepare("
-                SELECT id, status, expires_at, views_count, max_views, expires_at
-                FROM demo_links
-            ");
-            $allStmt->execute();
-            $allLinks = $allStmt->fetchAll();
-            
-            $foundLink = null;
-            foreach ($allLinks as $link) {
-                // We can't verify without hash, so we'll check status based on common failure reasons
-                // This is a fallback - the validateDemoToken should handle most cases
-            }
-            
-            $isExpired = true;
-            $errorMessage = 'Your demo access has expired or the link is no longer valid. Please request a new demo link.';
+            $vcStmt = $pdo->prepare("SELECT view_count FROM leads_for_demo WHERE id = ? LIMIT 1");
+            $vcStmt->execute([$leadId]);
+            $currentViewCount = (int) $vcStmt->fetchColumn();
         } catch (Exception $e) {
-            $errorMessage = 'Invalid or expired access token. Please request a new demo link.';
+            error_log("Error fetching view_count in watch.php: " . $e->getMessage());
+            $currentViewCount = 0;
         }
-    } else {
-        // Allow access as long as token is valid and not expired
-        // Multiple views/refreshes are allowed within the 60-minute window
-        // No need to check views_count - expiry time is the only restriction
+
+        if ($currentViewCount >= 2) {
+            // Already used both views
+            $isUsed = true;
+            $demoLink = false;
+            $errorMessage = 'You have used all your allowed demo views (2 views per email). If you need additional access, please contact our support team.';
+        } else {
+            // Increment view_count ONLY once per session+token combo (refresh-safe)
+            $sessionKey = 'viewed_token_' . md5($token);
+            if (empty($_SESSION[$sessionKey])) {
+                try {
+                    $pdo = getDbConnection();
+                    $pdo->prepare("UPDATE leads_for_demo SET view_count = view_count + 1, updated_at = NOW() WHERE id = ?")->execute([$leadId]);
+                    $_SESSION[$sessionKey] = true;
+                } catch (Exception $e) {
+                    error_log("Error incrementing view_count in watch.php: " . $e->getMessage());
+                }
+            }
+        }
     }
 }
 
@@ -544,16 +495,6 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                 if (!hasPlayed && !viewTracked) {
                     hasPlayed = true;
                     viewTracked = true;
-                    
-                    // Increment views on first play
-                    fetch('../api/track-view.php?token=<?php echo htmlspecialchars(urlencode($token), ENT_QUOTES, 'UTF-8'); ?>', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        }
-                    }).catch(function(error) {
-                        console.error('Error tracking view:', error);
-                    });
                     
                     // Track video start
                     trackVideoEvent('started', 0, 0);

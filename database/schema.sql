@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS `leads_for_demo` (
     `mobile` VARCHAR(20) NOT NULL,
     `campaign_source` VARCHAR(255) DEFAULT NULL,
     `interest` ENUM('interested', 'not_interested') NULL DEFAULT NULL COMMENT 'User selection below demo video',
+    `view_count` TINYINT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of times demo video viewed (max 2)',
     `status` ENUM('pending', 'verified', 'active', 'expired', 'blocked') NOT NULL DEFAULT 'pending',
     `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,

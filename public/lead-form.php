@@ -208,21 +208,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $pdo = getDbConnection();
 
                 // Check if email already exists
-                $stmt = $pdo->prepare("SELECT id, status FROM leads_for_demo WHERE email = ?");
+                $stmt = $pdo->prepare("SELECT id, status, view_count FROM leads_for_demo WHERE email = ?");
                 $stmt->execute([$formData['email']]);
                 $existingLead = $stmt->fetch();
                 if ($existingLead) {
-                    // Already registered — redirect to demo flow
-                    $_SESSION['lead_email'] = $formData['email'];
-                    header("Location: demo-flow.php?email=" . urlencode($formData['email']));
-                    exit;
+                    // Check view_count on lead record
+                    $existingViewCount = (int) ($existingLead['view_count'] ?? 0);
+
+                    if ($existingViewCount >= 2) {
+                        $errors[] = 'This email has already used the maximum allowed demo views (2). Please contact support if you need additional access.';
+                    } else {
+                        // Still has views remaining — redirect to demo flow
+                        $_SESSION['lead_email'] = $formData['email'];
+                        header("Location: demo-flow.php?email=" . urlencode($formData['email']));
+                        exit;
+                    }
                 } else {
+                    // Generate next ID in code (no AUTO_INCREMENT on table)
+                    $maxIdStmt = $pdo->query("SELECT COALESCE(MAX(id), 0) + 1 FROM leads_for_demo");
+                    $nextId = (int) $maxIdStmt->fetchColumn();
+
                     // Insert lead as verified (no OTP step)
                     $stmt = $pdo->prepare("
-                        INSERT INTO leads_for_demo (company_name, location, email, mobile, campaign_source, status)
-                        VALUES (?, ?, ?, ?, ?, 'verified')
+                        INSERT INTO leads_for_demo (id, company_name, location, email, mobile, campaign_source, status)
+                        VALUES (?, ?, ?, ?, ?, ?, 'verified')
                     ");
                     $stmt->execute([
+                        $nextId,
                         $formData['company_name'],
                         $formData['location'],
                         $formData['email'],
@@ -230,7 +242,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                         $formData['campaign_source'] ?: null
                     ]);
 
-                    $newLeadId = (int) $pdo->lastInsertId();
+                    $newLeadId = $nextId;
 
                     // Auto-generate demo link
                     require_once __DIR__ . '/../includes/demo-link-generator.php';
