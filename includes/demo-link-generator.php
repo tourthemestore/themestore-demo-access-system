@@ -39,7 +39,7 @@ function createDemoLink(PDO $pdo, int $leadId, string $token, string $tokenHash,
     $stmt = $pdo->prepare("
         INSERT INTO demo_links (
             lead_id, token, token_hash, status, views_count, max_views, expires_at
-        ) VALUES (?, ?, ?, 'active', 0, 2, NOW())
+        ) VALUES (?, ?, ?, 'active', 0, 3, NOW())
     ");
     $stmt->execute([$leadId, $token, $tokenHash]);
     

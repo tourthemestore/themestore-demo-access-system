@@ -5,7 +5,7 @@
  * 
  * Generates secure random token (>=64 chars)
  * Stores token with lead_id
- * Sets expiry = NOW + 1 hour
+ * Sets expiry = NOW + 3 hours
  * max_views = 1
  * Returns demo URL
  */
@@ -169,22 +169,22 @@ try {
         $pdo->prepare("UPDATE leads_for_demo SET status = 'verified', updated_at = NOW() WHERE id = ?")->execute([$foundLeadId]);
     }
     
-    // Check view_count on lead record (limit: 2 per email)
+    // Check if lead has a rescheduled follow-up (allows 4 views when rescheduled)
+    $isRescheduled = hasRescheduledFollowup($pdo, $foundLeadId);
+    $maxViews = $isRescheduled ? 4 : 3;
+    
     $vcStmt = $pdo->prepare("SELECT view_count FROM leads_for_demo WHERE id = ? LIMIT 1");
     $vcStmt->execute([$foundLeadId]);
     $leadViewCount = (int) $vcStmt->fetchColumn();
     
-    if ($leadViewCount >= 2) {
+    if ($leadViewCount >= $maxViews) {
         http_response_code(403);
         echo json_encode([
             'success' => false,
-            'message' => 'Demo access limit reached. This email has already used the maximum allowed demo views (2).'
+            'message' => 'Demo access limit reached. This email has already used the maximum allowed demo views (' . $maxViews . ').'
         ]);
         exit;
     }
-    
-    // Check if lead has a rescheduled follow-up
-    $isRescheduled = hasRescheduledFollowup($pdo, $foundLeadId);
     
     // Check if lead already has an active demo link
     $existingLink = hasActiveDemoLink($pdo, $foundLeadId);
@@ -217,8 +217,8 @@ try {
     $token = generateSecureToken(64);
     $tokenHash = hashToken($token);
     
-    // Create demo link record with 60 minutes expiry
-    $demoLinkId = createDemoLink($pdo, $foundLeadId, $token, $tokenHash, 1); // 1 hour = 60 minutes
+    // Create demo link record with 3 hours expiry
+    $demoLinkId = createDemoLink($pdo, $foundLeadId, $token, $tokenHash, 3);
     
     // Generate demo URL
     $demoUrl = generateDemoUrl($token);
@@ -233,9 +233,9 @@ try {
             'demo_url' => $demoUrl,
             'token' => $token, // Include token in response for immediate use
             'video_url' => VIMEO_EMBED_URL,
-            'expires_at' => date('Y-m-d H:i:s', time() + 3600), // 60 minutes from now
-            'expires_in' => 3600, // 60 minutes in seconds
-            'max_views' => 2
+            'expires_at' => date('Y-m-d H:i:s', time() + 10800), // 3 hours from now
+            'expires_in' => 10800, // 3 hours in seconds
+            'max_views' => 3
         ]
     ]);
     

@@ -9,6 +9,10 @@ session_start();
 // Load configuration
 require_once __DIR__ . '/../config/config.php';
 
+// Show detailed errors when ?debug=1 or form submitted with debug (remove in production)
+$showDebugErrors = (isset($_GET['debug']) && $_GET['debug'] === '1') 
+    || (isset($_POST['debug']) && $_POST['debug'] === '1');
+
 // CSRF Token generation and validation
 function generateCsrfToken(): string
 {
@@ -96,7 +100,7 @@ function sendDemoLinkEmail(string $email, string $name, string $demoUrl): bool
                 <div style='background: #f4f4f4; border: 2px dashed #667eea; padding: 20px; text-align: center; margin: 20px 0; border-radius: 8px;'>
                     <a href='" . htmlspecialchars($demoUrl, ENT_QUOTES, 'UTF-8') . "' style='color: #667eea; font-size: 16px; font-weight: bold; word-break: break-all;'>Click here to watch the demo</a>
                 </div>
-                <p><strong>Note:</strong> This link is valid for <strong>60 minutes</strong> and can be used up to <strong>2 times</strong>.</p>
+                <p><strong>Note:</strong> This link is valid for <strong>3 hours</strong> and can be used up to <strong>3 times</strong>.</p>
                 {$passwordSection}
                 <p>If you did not request this, please ignore this email.</p>
                 <hr>
@@ -105,7 +109,7 @@ function sendDemoLinkEmail(string $email, string $name, string $demoUrl): bool
         </body>
         </html>";
 
-    $textBody = "Hello {$name},\n\nYour ThemeStore demo access link: {$demoUrl}\n\nThis link is valid for 60 minutes and can be used up to 2 times.";
+    $textBody = "Hello {$name},\n\nYour ThemeStore demo access link: {$demoUrl}\n\nThis link is valid for 3 hours and can be used up to 3 times.";
     if ($vimeoPassword) {
         $textBody .= "\n\nVideo Password: {$vimeoPassword}\nEnter this password when the video player prompts you.";
     }
@@ -168,19 +172,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $formData['mobile'] = sanitizeInput($_POST['mobile'] ?? '');
         $formData['campaign_source'] = sanitizeInput($_POST['campaign_source'] ?? '');
 
-        // Server-side validation
-        if (empty($formData['company_name'])) {
-            $errors[] = 'Company Name is required.';
-        } elseif (strlen($formData['company_name']) > 255) {
-            $errors[] = 'Company Name must not exceed 255 characters.';
-        }
-
-        if (empty($formData['location'])) {
-            $errors[] = 'Location is required.';
-        } elseif (strlen($formData['location']) > 255) {
-            $errors[] = 'Location must not exceed 255 characters.';
-        }
-
+        // Validate email first
         if (empty($formData['email'])) {
             $errors[] = 'Email is required.';
         } elseif (!validateEmail($formData['email'])) {
@@ -189,12 +181,40 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $errors[] = 'Email must not exceed 255 characters.';
         }
 
-        if (empty($formData['mobile'])) {
-            $errors[] = 'Mobile number is required.';
-        } elseif (!validateMobile($formData['mobile'])) {
+        // Validate email exists in enquiry_master (required for demo access)
+        if (empty($errors)) {
+            try {
+                $pdo = getDbConnection();
+                $enqStmt = $pdo->prepare("SELECT mobile_no, company_name, city FROM enquiry_master WHERE email_id = ? LIMIT 1");
+                $enqStmt->execute([$formData['email']]);
+                $enquiry = $enqStmt->fetch();
+                if (!$enquiry) {
+                    $errors[] = 'This email is not registered with us.';
+                } else {
+                    // Use enquiry_master data (overrides any submitted values)
+                    $formData['mobile'] = trim($enquiry['mobile_no'] ?? '');
+                    $formData['company_name'] = trim($enquiry['company_name'] ?? '');
+                    $formData['location'] = trim($enquiry['city'] ?? '');
+                }
+            } catch (Throwable $e) {
+                error_log("lead-form enquiry_master check: " . $e->getMessage());
+                $errors[] = ($showDebugErrors || ini_get('display_errors'))
+                    ? 'Unable to validate email: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')
+                    : 'Unable to validate email. Please try again later.';
+            }
+        }
+
+        // Contact no, company name, city are non-mandatory (from enquiry_master when found)
+        if (!empty($formData['mobile']) && !validateMobile($formData['mobile'])) {
             $errors[] = 'Please enter a valid mobile number (10-15 digits).';
         } elseif (strlen($formData['mobile']) > 20) {
             $errors[] = 'Mobile number must not exceed 20 characters.';
+        }
+        if (strlen($formData['company_name']) > 255) {
+            $errors[] = 'Company name must not exceed 255 characters.';
+        }
+        if (strlen($formData['location']) > 255) {
+            $errors[] = 'City must not exceed 255 characters.';
         }
 
         if (strlen($formData['campaign_source']) > 255) {
@@ -212,11 +232,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 $stmt->execute([$formData['email']]);
                 $existingLead = $stmt->fetch();
                 if ($existingLead) {
-                    // Check view_count on lead record
+                    // Check view_count on lead record (allow 4 when rescheduled)
                     $existingViewCount = (int) ($existingLead['view_count'] ?? 0);
+                    $reschedStmt = $pdo->prepare("SELECT status FROM demo_followups WHERE lead_id = ? ORDER BY created_at DESC, id DESC LIMIT 1");
+                    $reschedStmt->execute([$existingLead['id']]);
+                    $reschedRow = $reschedStmt->fetch();
+                    $isRescheduled = ($reschedRow && $reschedRow['status'] === 'rescheduled');
+                    $maxViews = $isRescheduled ? 4 : 3;
 
-                    if ($existingViewCount >= 2) {
-                        $errors[] = 'This email has already used the maximum allowed demo views (2). Please contact support if you need additional access.';
+                    if ($existingViewCount >= $maxViews) {
+                        $errors[] = 'This email has already used the maximum allowed demo views (' . $maxViews . '). Please contact support if you need additional access.';
                     } else {
                         // Still has views remaining — redirect to demo flow
                         $_SESSION['lead_email'] = $formData['email'];
@@ -235,10 +260,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     ");
                     $stmt->execute([
                         $nextId,
-                        $formData['company_name'],
-                        $formData['location'],
+                        $formData['company_name'] ?: '',
+                        $formData['location'] ?: '',
                         $formData['email'],
-                        $formData['mobile'],
+                        $formData['mobile'] ?: '',
                         $formData['campaign_source'] ?: null
                     ]);
 
@@ -248,7 +273,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     require_once __DIR__ . '/../includes/demo-link-generator.php';
                     $token = generateSecureToken(64);
                     $tokenHash = hashToken($token);
-                    createDemoLink($pdo, $newLeadId, $token, $tokenHash, 1);
+                    createDemoLink($pdo, $newLeadId, $token, $tokenHash, 3);
 
                     // Build demo watch URL
                     $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
@@ -272,21 +297,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Redirect to demo flow after 2 seconds
                     header("Refresh: 2; url=demo-flow.php?email=" . urlencode($formData['email']));
                 }
-            } catch (PDOException $e) {
-                // Log error in production (don't expose database details)
-                error_log("Database error in lead-form.php: " . $e->getMessage());
-                error_log("Error code: " . $e->getCode());
-                error_log("SQL State: " . $e->errorInfo[0] ?? 'N/A');
-                
-                // Show more detailed error for debugging (remove in production)
-                $errorMessage = 'An error occurred while processing your request. Please try again later.';
-                if (ini_get('display_errors')) {
-                    $errorMessage .= ' Error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8');
-                }
-                $errors[] = $errorMessage;
-            } catch (Exception $e) {
-                error_log("General error in lead-form.php: " . $e->getMessage());
-                $errors[] = 'An error occurred while processing your request. Please try again later.';
+            } catch (Throwable $e) {
+                error_log("lead-form.php error: " . $e->getMessage());
+                error_log("lead-form.php trace: " . $e->getTraceAsString());
+                $errors[] = ($showDebugErrors || ini_get('display_errors'))
+                    ? 'Error: ' . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8')
+                    : 'An error occurred while processing your request. Please try again later.';
             }
         }
     }
@@ -359,6 +375,21 @@ $csrfToken = generateCsrfToken();
             outline: none;
             border-color: #667eea;
         }
+        input[readonly] {
+            background: #f5f5f5;
+            color: #666;
+            cursor: not-allowed;
+        }
+        .field-hint {
+            font-size: 12px;
+            color: #28a745;
+            margin-top: 4px;
+        }
+        .field-error {
+            font-size: 12px;
+            color: #dc3545;
+            margin-top: 4px;
+        }
         .error-message {
             background: #fee;
             border: 1px solid #fcc;
@@ -423,36 +454,9 @@ $csrfToken = generateCsrfToken();
             </div>
         <?php endif; ?>
 
-        <form method="POST" action="" novalidate>
+        <form method="POST" action="" novalidate id="leadForm">
             <input type="hidden" name="csrf_token" value="<?php echo htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8'); ?>">
-
-            <div class="form-group">
-                <label for="company_name">
-                    Company Name <span class="required">*</span>
-                </label>
-                <input 
-                    type="text" 
-                    id="company_name" 
-                    name="company_name" 
-                    value="<?php echo htmlspecialchars($formData['company_name'], ENT_QUOTES, 'UTF-8'); ?>"
-                    required
-                    maxlength="255"
-                >
-            </div>
-
-            <div class="form-group">
-                <label for="location">
-                    Location <span class="required">*</span>
-                </label>
-                <input 
-                    type="text" 
-                    id="location" 
-                    name="location" 
-                    value="<?php echo htmlspecialchars($formData['location'], ENT_QUOTES, 'UTF-8'); ?>"
-                    required
-                    maxlength="255"
-                >
-            </div>
+            <?php if ($showDebugErrors): ?><input type="hidden" name="debug" value="1"><?php endif; ?>
 
             <div class="form-group">
                 <label for="email">
@@ -465,21 +469,47 @@ $csrfToken = generateCsrfToken();
                     value="<?php echo htmlspecialchars($formData['email'], ENT_QUOTES, 'UTF-8'); ?>"
                     required
                     maxlength="255"
+                    placeholder="Enter your registered email"
+                    autocomplete="email"
                 >
+                <div id="email-hint" class="field-hint" style="display:none;"></div>
+                <div id="email-error" class="field-error" style="display:none;"></div>
             </div>
 
             <div class="form-group">
-                <label for="mobile">
-                    Mobile <span class="required">*</span>
-                </label>
+                <label for="mobile">Contact No</label>
                 <input 
                     type="tel" 
                     id="mobile" 
                     name="mobile" 
                     value="<?php echo htmlspecialchars($formData['mobile'], ENT_QUOTES, 'UTF-8'); ?>"
-                    required
                     maxlength="20"
                     placeholder="e.g., +1234567890"
+                    readonly
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="company_name">Company Name</label>
+                <input 
+                    type="text" 
+                    id="company_name" 
+                    name="company_name" 
+                    value="<?php echo htmlspecialchars($formData['company_name'], ENT_QUOTES, 'UTF-8'); ?>"
+                    maxlength="255"
+                    readonly
+                >
+            </div>
+
+            <div class="form-group">
+                <label for="location">City</label>
+                <input 
+                    type="text" 
+                    id="location" 
+                    name="location" 
+                    value="<?php echo htmlspecialchars($formData['location'], ENT_QUOTES, 'UTF-8'); ?>"
+                    maxlength="255"
+                    readonly
                 >
             </div>
 
@@ -489,8 +519,76 @@ $csrfToken = generateCsrfToken();
                 value="<?php echo htmlspecialchars($formData['campaign_source'], ENT_QUOTES, 'UTF-8'); ?>"
             >
 
-            <button type="submit">Submit</button>
+            <button type="submit" id="submitBtn">Submit</button>
         </form>
+
+        <script>
+        (function() {
+            const emailInput = document.getElementById('email');
+            const mobileInput = document.getElementById('mobile');
+            const companyInput = document.getElementById('company_name');
+            const cityInput = document.getElementById('location');
+            const emailHint = document.getElementById('email-hint');
+            const emailError = document.getElementById('email-error');
+            const submitBtn = document.getElementById('submitBtn');
+            let emailValidated = false;
+
+            function clearFrozenFields() {
+                mobileInput.value = '';
+                companyInput.value = '';
+                cityInput.value = '';
+            }
+
+            function checkEmail() {
+                const email = emailInput.value.trim();
+                emailHint.style.display = 'none';
+                emailError.style.display = 'none';
+                emailValidated = false;
+
+                if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                    clearFrozenFields();
+                    return;
+                }
+
+                submitBtn.disabled = true;
+                fetch('../api/check-enquiry-email.php?email=' + encodeURIComponent(email))
+                    .then(function(r) { return r.json(); })
+                    .then(function(data) {
+                        if (data.found) {
+                            mobileInput.value = data.mobile_no || '';
+                            companyInput.value = data.company_name || '';
+                            cityInput.value = data.city || '';
+                            emailHint.textContent = 'Details loaded from our records.';
+                            emailHint.style.display = 'block';
+                            emailHint.style.color = '#28a745';
+                            emailValidated = true;
+                        } else {
+                            clearFrozenFields();
+                            emailError.textContent = 'This email is not registered with us.';
+                            emailError.style.display = 'block';
+                        }
+                    })
+                    .catch(function() {
+                        clearFrozenFields();
+                        emailError.textContent = 'Could not verify email. Please try again.';
+                        emailError.style.display = 'block';
+                    })
+                    .finally(function() {
+                        submitBtn.disabled = false;
+                    });
+            }
+
+            emailInput.addEventListener('blur', function() {
+                checkEmail();
+            });
+
+            emailInput.addEventListener('input', function() {
+                emailHint.style.display = 'none';
+                emailError.style.display = 'none';
+                clearFrozenFields();
+            });
+        })();
+        </script>
     </div>
 </body>
 </html>

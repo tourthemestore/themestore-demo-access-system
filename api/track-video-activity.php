@@ -12,6 +12,20 @@ header('Content-Type: application/json');
 require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/token-validator.php';
 
+// Load PHPMailer if available
+$phpmailerAvailable = false;
+$vendorPath = dirname(__DIR__) . '/vendor/autoload.php';
+if (file_exists($vendorPath)) {
+    try {
+        require_once $vendorPath;
+        if (class_exists('PHPMailer\PHPMailer\PHPMailer')) {
+            $phpmailerAvailable = true;
+        }
+    } catch (Exception $e) {
+        error_log("PHPMailer autoload failed: " . $e->getMessage());
+    }
+}
+
 /**
  * Get client IP address
  */
@@ -34,6 +48,85 @@ function getClientIp(): string
     }
     
     return $_SERVER['REMOTE_ADDR'] ?? '0.0.0.0';
+}
+
+/**
+ * Send admin notification email when a lead abandons the demo video
+ */
+function sendAbandonedNotificationEmail(
+    int $leadId,
+    string $companyName,
+    string $leadEmail,
+    float $progressPercentage,
+    int $durationWatched
+): void {
+    global $phpmailerAvailable;
+
+    $toEmail = defined('ADMIN_NOTIFICATION_EMAIL') && !empty(ADMIN_NOTIFICATION_EMAIL)
+        ? ADMIN_NOTIFICATION_EMAIL
+        : SMTP_FROM_EMAIL;
+
+    $protocol = (!empty($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+    $host = $_SERVER['HTTP_HOST'] ?? 'localhost';
+    $scriptPath = $_SERVER['SCRIPT_NAME'] ?? '';
+    $basePath = dirname(dirname($scriptPath));
+    $basePath = rtrim($basePath, '/');
+    $detailUrl = $protocol . '://' . $host . $basePath . '/admin/admin-lead-detail.php?id=' . $leadId;
+
+    $subject = 'ThemeStore Demo: Lead closed video without completing';
+    $progressText = round($progressPercentage, 1) . '%';
+    $durationText = gmdate('i:s', $durationWatched);
+
+    $htmlBody = "
+        <html>
+        <head><style>body { font-family: Arial, sans-serif; line-height: 1.6; color: #333; } .container { max-width: 600px; margin: 0 auto; padding: 20px; } .alert { background: #f8d7da; border: 1px solid #f5c6cb; color: #721c24; padding: 15px; border-radius: 8px; margin: 20px 0; } .btn { display: inline-block; padding: 12px 24px; background: #667eea; color: white; text-decoration: none; border-radius: 6px; margin-top: 10px; }</style></head>
+        <body>
+            <div class='container'>
+                <h2>Demo Video Abandoned</h2>
+                <p>A lead closed the demo video window without completing it.</p>
+                <div class='alert'>
+                    <strong>Lead:</strong> " . htmlspecialchars($companyName, ENT_QUOTES, 'UTF-8') . "<br>
+                    <strong>Email:</strong> " . htmlspecialchars($leadEmail, ENT_QUOTES, 'UTF-8') . "<br>
+                    <strong>Watched:</strong> {$progressText} ({$durationText})<br>
+                </div>
+                <p><a href='" . htmlspecialchars($detailUrl, ENT_QUOTES, 'UTF-8') . "' class='btn'>View Lead Details</a></p>
+                <hr>
+                <p style='font-size: 12px; color: #666;'>This is an automated notification from ThemeStore Demo Access System.</p>
+            </div>
+        </body>
+        </html>";
+
+    $textBody = "Demo Video Abandoned\n\nLead: {$companyName}\nEmail: {$leadEmail}\nWatched: {$progressText} ({$durationText})\n\nView lead: {$detailUrl}";
+
+    if ($phpmailerAvailable) {
+        try {
+            $mail = new \PHPMailer\PHPMailer\PHPMailer(true);
+            $mail->isSMTP();
+            $mail->Host = SMTP_HOST;
+            $mail->SMTPAuth = true;
+            $mail->Username = SMTP_USER;
+            $mail->Password = SMTP_PASS;
+            $mail->SMTPSecure = \PHPMailer\PHPMailer\PHPMailer::ENCRYPTION_STARTTLS;
+            $mail->Port = SMTP_PORT;
+            $mail->CharSet = 'UTF-8';
+            $mail->SMTPDebug = 0;
+            $mail->setFrom(SMTP_FROM_EMAIL, SMTP_FROM_NAME);
+            $mail->addAddress($toEmail);
+            $mail->isHTML(true);
+            $mail->Subject = $subject;
+            $mail->Body = $htmlBody;
+            $mail->AltBody = $textBody;
+            $mail->send();
+            error_log("Abandoned notification email sent to: {$toEmail} for lead ID: {$leadId}");
+        } catch (\Exception $e) {
+            error_log("PHPMailer error sending abandoned notification: " . ($e->getMessage()));
+            $headers = "MIME-Version: 1.0\r\nContent-type: text/html; charset=UTF-8\r\nFrom: " . SMTP_FROM_NAME . " <" . SMTP_FROM_EMAIL . ">\r\n";
+            @mail($toEmail, $subject, $htmlBody, $headers);
+        }
+    } else {
+        $headers = "MIME-Version: 1.0\r\nContent-type: text/html; charset=UTF-8\r\nFrom: " . SMTP_FROM_NAME . " <" . SMTP_FROM_EMAIL . ">\r\n";
+        @mail($toEmail, $subject, $htmlBody, $headers);
+    }
 }
 
 /**
@@ -296,6 +389,26 @@ try {
     );
     
     if ($success) {
+        // Send admin notification email when lead abandons (closes video without completing)
+        if ($eventType === 'abandoned') {
+            try {
+                $leadStmt = $pdo->prepare("SELECT company_name, email FROM leads_for_demo WHERE id = ? LIMIT 1");
+                $leadStmt->execute([$leadId]);
+                $lead = $leadStmt->fetch();
+                if ($lead) {
+                    sendAbandonedNotificationEmail(
+                        $leadId,
+                        $lead['company_name'] ?: 'N/A',
+                        $lead['email'] ?: 'N/A',
+                        $progressPercentage,
+                        $durationWatched
+                    );
+                }
+            } catch (Exception $e) {
+                error_log("Failed to send abandoned notification email: " . $e->getMessage());
+            }
+        }
+
         http_response_code(200);
         echo json_encode([
             'success' => true,

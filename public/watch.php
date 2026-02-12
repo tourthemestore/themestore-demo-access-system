@@ -4,7 +4,7 @@
  * PHP 8 - No Framework
  * 
  * Validates token and displays video player
- * Uses leads_for_demo.view_count for 2-view-per-email limit
+ * Uses leads_for_demo.view_count for 3-view-per-email limit
  * Session prevents page refreshes from double-counting
  */
 
@@ -40,16 +40,22 @@ if (empty($token)) {
             $vcStmt = $pdo->prepare("SELECT view_count FROM leads_for_demo WHERE id = ? LIMIT 1");
             $vcStmt->execute([$leadId]);
             $currentViewCount = (int) $vcStmt->fetchColumn();
+            // Allow 4 views when demo is rescheduled
+            $reschedStmt = $pdo->prepare("SELECT status FROM demo_followups WHERE lead_id = ? ORDER BY created_at DESC, id DESC LIMIT 1");
+            $reschedStmt->execute([$leadId]);
+            $reschedRow = $reschedStmt->fetch();
+            $isRescheduled = ($reschedRow && $reschedRow['status'] === 'rescheduled');
+            $maxViews = $isRescheduled ? 4 : 3;
         } catch (Exception $e) {
             error_log("Error fetching view_count in watch.php: " . $e->getMessage());
             $currentViewCount = 0;
+            $maxViews = 3;
         }
 
-        if ($currentViewCount >= 2) {
-            // Already used both views
+        if ($currentViewCount >= $maxViews) {
             $isUsed = true;
             $demoLink = false;
-            $errorMessage = 'You have used all your allowed demo views (2 views per email). If you need additional access, please contact our support team.';
+            $errorMessage = 'You have used all your allowed demo views (' . $maxViews . ' views per email). If you need additional access, please contact our support team.';
         } else {
             // Increment view_count ONLY once per session+token combo (refresh-safe)
             $sessionKey = 'viewed_token_' . md5($token);
@@ -291,7 +297,7 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             </div>
 
             <div class="info-message">
-                <strong>Note:</strong> This demo link is valid for 60 minutes and can be used up to 2 times.
+                <strong>Note:</strong> This demo link is valid for 3 hours and can be used up to 3 times.
                 <?php if (defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)): ?>
                     <br><br>
                     <strong style="color: #856404;">🔒 Video Password:</strong> The video is password-protected. 
@@ -433,8 +439,11 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             let playerInitialized = false;
             let hasPlayed = false;
             let viewTracked = false;
+            let hasTrackedCompletion = false;
             let progressTrackingInterval = null;
             let lastTrackedProgress = 0;
+            let lastKnownCurrentTime = 0;
+            let lastKnownDuration = 1;
             
             function initializePlayer() {
                 if (playerInitialized) return;
@@ -503,8 +512,10 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                     progressTrackingInterval = setInterval(function() {
                         player.getCurrentTime().then(function(seconds) {
                             player.getDuration().then(function(duration) {
+                                lastKnownCurrentTime = Math.floor(seconds);
+                                lastKnownDuration = Math.floor(duration) || 1;
                                 const progress = (seconds / duration) * 100;
-                                const currentTime = Math.floor(seconds);
+                                const currentTime = lastKnownCurrentTime;
                                 
                                 // Track progress every 15 seconds
                                 if (currentTime >= lastTrackedProgress + 15) {
@@ -520,6 +531,7 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                 // Track video completion
                 player.on('ended', function() {
                     if (!player) return;
+                    hasTrackedCompletion = true;
                     player.getDuration().then(function(duration) {
                         trackVideoEvent('completed', 100, Math.floor(duration));
                         if (progressTrackingInterval) {
@@ -529,6 +541,16 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                         console.error('Error getting duration:', error);
                     });
                 });
+
+                // Track abandoned when user closes tab/window without completing
+                function trackAbandonedIfNeeded() {
+                    if (hasPlayed && !hasTrackedCompletion) {
+                        const progress = lastKnownDuration > 0 ? (lastKnownCurrentTime / lastKnownDuration) * 100 : 0;
+                        trackVideoEventBeacon('abandoned', progress, lastKnownCurrentTime);
+                    }
+                }
+                window.addEventListener('beforeunload', trackAbandonedIfNeeded);
+                window.addEventListener('pagehide', trackAbandonedIfNeeded);
                 
                 // Handle errors
                 player.on('error', function(error) {
@@ -556,6 +578,18 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                 }).catch(function(error) {
                     console.error('Error tracking video event:', error);
                 });
+            }
+
+            // Use sendBeacon for unload events (more reliable when page is closing)
+            function trackVideoEventBeacon(eventType, progressPercentage, durationWatched) {
+                const url = new URL('../api/track-video-activity.php', window.location.href).href;
+                const data = JSON.stringify({
+                    token: '<?php echo htmlspecialchars($token, ENT_QUOTES, 'UTF-8'); ?>',
+                    event_type: eventType,
+                    progress_percentage: progressPercentage,
+                    duration_watched: durationWatched
+                });
+                navigator.sendBeacon(url, new Blob([data], { type: 'application/json' }));
             }
             
             

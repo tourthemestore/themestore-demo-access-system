@@ -11,7 +11,7 @@
 require_once __DIR__ . '/../config/config.php';
 
 /**
- * Check if demo link is expired (created_at + 60 minutes).
+ * Check if demo link is expired (created_at + 3 hours).
  * Uses created_at and time() to avoid datetime parsing / timezone issues.
  */
 function isDemoLinkExpired(string $createdAt): bool
@@ -24,7 +24,7 @@ function isDemoLinkExpired(string $createdAt): bool
     if ($createdTs === false) {
         return true;
     }
-    return time() > $createdTs + 3600; // 60 minutes
+    return time() > $createdTs + 10800; // 3 hours
 }
 
 /**

@@ -183,6 +183,15 @@ function formatVideoCompletion($progressPercentage, $videoStatus): string
                     <span class="progress-text">100% Complete</span>
                 </div>';
     }
+
+    // If status is abandoned (closed window without completing)
+    if ($videoStatus === 'abandoned') {
+        $pct = ($progressPercentage !== null && $progressPercentage > 0) ? round($progressPercentage, 1) : 0;
+        return '<div class="progress-container">
+                    <div class="progress-bar progress-low" style="width: ' . min($pct, 100) . '%"></div>
+                    <span class="progress-text">' . htmlspecialchars($pct, ENT_QUOTES, 'UTF-8') . '% — Abandoned</span>
+                </div>';
+    }
     
     // If no video activity exists at all (both are null/empty)
     if ($progressPercentage === null && empty($videoStatus)) {

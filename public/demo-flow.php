@@ -70,8 +70,8 @@ try {
     $isRescheduled = false;
 }
 
-// Check view_count on lead (limit: 2 per email)
-$maxAllowedViews = 2;
+// Check view_count on lead (limit: 3 per email, 4 when rescheduled)
+$maxAllowedViews = $isRescheduled ? 4 : 3;
 $totalViews = (int) ($lead['view_count'] ?? 0);
 $viewsExhausted = ($totalViews >= $maxAllowedViews);
 
@@ -91,10 +91,10 @@ if (!$viewsExhausted) {
     $stmt->execute([$leadId]);
     $demoLink = $stmt->fetch();
 
-    // Check if existing link is still valid (created_at + 60 min)
+    // Check if existing link is still valid (created_at + 3 hours)
     if ($demoLink) {
         $createdTs = @strtotime($demoLink['created_at']);
-        $isValid = ($createdTs !== false && time() <= $createdTs + 3600);
+        $isValid = ($createdTs !== false && time() <= $createdTs + 10800);
         if ($isValid && !$isRescheduled) {
             $currentStep = 'demo';
             $demoToken = $demoLink['token'];
@@ -110,7 +110,7 @@ if (!$viewsExhausted) {
         try {
             $token = generateSecureToken(64);
             $tokenHash = hashToken($token);
-            createDemoLink($pdo, $leadId, $token, $tokenHash, 1);
+            createDemoLink($pdo, $leadId, $token, $tokenHash, 3);
             $currentStep = 'demo';
             $demoToken = $token;
         } catch (Exception $e) {
@@ -188,7 +188,7 @@ if (!$viewsExhausted) {
                 <button type="button" class="btn-watch" onclick="watchVideo()">Watch Video</button>
             </div>
             <div class="message info">
-                This link is valid for <strong>60 minutes</strong> and can be used up to <strong>2 times</strong>.
+                This link is valid for <strong>3 hours</strong> and can be used up to <strong>3 times</strong>.
                 <?php $remainingViews = $maxAllowedViews - $totalViews; ?>
                 <?php if ($remainingViews < $maxAllowedViews): ?>
                     <br>You have <strong><?php echo $remainingViews; ?></strong> view(s) remaining.
