@@ -17,6 +17,26 @@ if ($leadId <= 0) {
     die('Invalid lead ID');
 }
 
+// Restrict sales users to only their assigned leads
+if (!empty($loggedInUser) && empty($loggedInUser['is_admin'])) {
+    try {
+        $pdo = getDbConnection();
+        $leadEmailStmt = $pdo->prepare("SELECT email FROM leads_for_demo WHERE id = ? LIMIT 1");
+        $leadEmailStmt->execute([$leadId]);
+        $leadEmail = $leadEmailStmt->fetchColumn();
+        if ($leadEmail) {
+            $assignStmt = $pdo->prepare("SELECT 1 FROM enquiry_master WHERE email_id = ? AND assigned_emp_id = ? LIMIT 1");
+            $assignStmt->execute([$leadEmail, (int) $loggedInUser['emp_id']]);
+            if (!$assignStmt->fetch()) {
+                die('Access denied. This lead is not assigned to you.');
+            }
+        }
+    } catch (Throwable $e) {
+        error_log("admin-lead-detail access check: " . $e->getMessage());
+        die('Unable to verify access.');
+    }
+}
+
 /**
  * Get lead information
  */
@@ -511,9 +531,24 @@ $timeline = buildActivityTimeline($demoLinks, $videoActivity, $followups, $queri
 <body>
     <div class="container">
         <div class="header">
-            <a href="admin-leads.php" class="back-link">← Back to Leads</a>
-            <h1><?php echo htmlspecialchars($lead['company_name'], ENT_QUOTES, 'UTF-8'); ?></h1>
-            <p>Lead ID: <?php echo $lead['id']; ?> | <?php echo formatStatusBadge($lead['status']); ?></p>
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div>
+                    <a href="admin-leads.php" class="back-link">← Back to Leads</a>
+                    <h1><?php echo htmlspecialchars($lead['company_name'], ENT_QUOTES, 'UTF-8'); ?></h1>
+                    <p>Lead ID: <?php echo $lead['id']; ?> | <?php echo formatStatusBadge($lead['status']); ?></p>
+                </div>
+                <div style="text-align:right; font-size:13px; color:rgba(255,255,255,0.85);">
+                    <?php
+                        $uName = htmlspecialchars($loggedInUser['emp_name'] ?? $loggedInUser['username'] ?? '', ENT_QUOTES, 'UTF-8');
+                        $uRole = !empty($loggedInUser['is_admin']) ? 'Admin' : 'Sales';
+                    ?>
+                    <?php echo $uName; ?> (<?php echo $uRole; ?>)
+                    &nbsp;|&nbsp;
+                    <a href="index.php" style="color:#fff; text-decoration:underline;">Dashboard</a>
+                    &nbsp;|&nbsp;
+                    <a href="admin-leads.php?logout=1" style="color:#fff; text-decoration:underline;">Logout</a>
+                </div>
+            </div>
         </div>
 
         <!-- Lead Information -->
@@ -1011,6 +1046,29 @@ $timeline = buildActivityTimeline($demoLinks, $videoActivity, $followups, $queri
         }
         
     </script>
+    <script>
+    // Log logout when user closes the browser window/tab
+    (function() {
+        var isInternalNav = false;
+
+        document.addEventListener('click', function(e) {
+            var link = e.target.closest('a[href]');
+            if (link) isInternalNav = true;
+        }, true);
+        document.addEventListener('submit', function() {
+            isInternalNav = true;
+        }, true);
+
+        function sendLogout() {
+            if (isInternalNav) return;
+            var url = new URL('../api/admin-log-activity.php', window.location.href).href;
+            var data = JSON.stringify({ action: 'logout' });
+            navigator.sendBeacon(url, new Blob([data], { type: 'application/json' }));
+        }
+
+        window.addEventListener('pagehide', sendLogout);
+        window.addEventListener('beforeunload', sendLogout);
+    })();
+    </script>
 </body>
 </html>
-

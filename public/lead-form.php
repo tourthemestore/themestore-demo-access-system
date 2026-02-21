@@ -294,8 +294,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     // Regenerate CSRF token after successful submission
                     unset($_SESSION['csrf_token']);
                     
-                    // Redirect to demo flow after 2 seconds
-                    header("Refresh: 2; url=demo-flow.php?email=" . urlencode($formData['email']));
+                    // Redirect to demo flow after 5 seconds
+                    header("Refresh: 5; url=demo-flow.php?email=" . urlencode($formData['email']));
                 }
             } catch (Throwable $e) {
                 error_log("lead-form.php error: " . $e->getMessage());
@@ -440,8 +440,20 @@ $csrfToken = generateCsrfToken();
         <?php if ($success): ?>
             <div class="success-message">
                 Thank you! Your demo access link has been sent to your email.<br>
-                Redirecting to your demo...
+                Please also check your spam/junk folder.<br><br>
+                Redirecting to your demo in <span id="countdown">5</span> seconds...
             </div>
+            <script>
+            (function() {
+                var sec = 5;
+                var el = document.getElementById('countdown');
+                var timer = setInterval(function() {
+                    sec--;
+                    if (el) el.textContent = sec;
+                    if (sec <= 0) clearInterval(timer);
+                }, 1000);
+            })();
+            </script>
         <?php endif; ?>
 
         <?php if (!empty($errors)): ?>

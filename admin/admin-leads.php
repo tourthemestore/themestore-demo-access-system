@@ -11,32 +11,48 @@ require_once __DIR__ . '/../config/config.php';
 require_once __DIR__ . '/../includes/admin-auth.php';
 
 /**
- * Get all leads with related data
+ * Get leads with related data.
+ * Admin (emp_id=0) sees all leads.
+ * Sales users see only leads whose email matches enquiry_master.assigned_emp_id.
+ *
  * @param string|null $dateFrom Start date (Y-m-d format)
- * @param string|null $dateTo End date (Y-m-d format)
+ * @param string|null $dateTo   End date (Y-m-d format)
+ * @param array       $user     Logged-in user from session (from admin-auth.php)
  */
-function getAllLeads(?string $dateFrom = null, ?string $dateTo = null): array
+function getAllLeads(?string $dateFrom = null, ?string $dateTo = null, array $user = []): array
 {
     try {
         $pdo = getDbConnection();
         
-        // Build WHERE clause for date filtering
-        $whereClause = '';
+        // Build WHERE conditions
+        $conditions = [];
         $params = [];
         
         if (!empty($dateFrom) && !empty($dateTo)) {
-            $whereClause = "WHERE DATE(l.created_at) BETWEEN :date_from AND :date_to";
+            $conditions[] = "DATE(l.created_at) BETWEEN :date_from AND :date_to";
             $params[':date_from'] = $dateFrom;
             $params[':date_to'] = $dateTo;
         } elseif (!empty($dateFrom)) {
-            $whereClause = "WHERE DATE(l.created_at) >= :date_from";
+            $conditions[] = "DATE(l.created_at) >= :date_from";
             $params[':date_from'] = $dateFrom;
         } elseif (!empty($dateTo)) {
-            $whereClause = "WHERE DATE(l.created_at) <= :date_to";
+            $conditions[] = "DATE(l.created_at) <= :date_to";
             $params[':date_to'] = $dateTo;
         }
+
+        // Sales users: filter leads assigned to them via enquiry_master
+        $isAdmin = !empty($user['is_admin']);
+        if (!$isAdmin && !empty($user['emp_id'])) {
+            $conditions[] = "l.email IN (SELECT email_id FROM enquiry_master WHERE assigned_emp_id = :emp_id)";
+            $params[':emp_id'] = (int) $user['emp_id'];
+        }
+
+        $whereClause = '';
+        if (!empty($conditions)) {
+            $whereClause = 'WHERE ' . implode(' AND ', $conditions);
+        }
         
-        // Query to get all leads with demo link and video activity data
+        // Query to get leads with demo link and video activity data
         $sql = "
             SELECT 
                 l.id,
@@ -244,9 +260,11 @@ if (!empty($dateTo)) {
     $dateTo = date('Y-m-d', strtotime($dateTo));
 }
 
-// Get all leads with filters
-$leads = getAllLeads($dateFrom, $dateTo);
+// Get leads (filtered by user role)
+$leads = getAllLeads($dateFrom, $dateTo, $loggedInUser ?? []);
 $totalLeads = count($leads);
+
+
 ?>
 <!DOCTYPE html>
 <html lang="en">
@@ -500,7 +518,22 @@ $totalLeads = count($leads);
 <body>
     <div class="container">
         <div class="header">
-            <h1>Leads Management</h1>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                <div>
+                    <h1 style="margin-bottom:0">Leads Management</h1>
+                </div>
+                <div style="text-align:right; font-size:14px;">
+                    <?php
+                        $uName = htmlspecialchars($loggedInUser['emp_name'] ?? $loggedInUser['username'] ?? '', ENT_QUOTES, 'UTF-8');
+                        $uRole = !empty($loggedInUser['is_admin']) ? 'Admin' : 'Sales';
+                    ?>
+                    Logged in as: <strong><?php echo $uName; ?></strong> (<?php echo $uRole; ?>)
+                    &nbsp;|&nbsp;
+                    <a href="index.php" style="color:#fff; text-decoration:underline;">Dashboard</a>
+                    &nbsp;|&nbsp;
+                    <a href="?logout=1" style="color:#fff; text-decoration:underline;">Logout</a>
+                </div>
+            </div>
             <p>View and manage all leads, verification status, demo links, and video activity</p>
             <div class="stats">
                 <div class="stat-item">
@@ -599,6 +632,30 @@ $totalLeads = count($leads);
             <?php endif; ?>
         </div>
     </div>
+    <script>
+    // Log logout when user closes the browser window/tab
+    (function() {
+        var isInternalNav = false;
+
+        // Mark any link click or form submit as internal navigation
+        document.addEventListener('click', function(e) {
+            var link = e.target.closest('a[href]');
+            if (link) isInternalNav = true;
+        }, true);
+        document.addEventListener('submit', function() {
+            isInternalNav = true;
+        }, true);
+
+        function sendLogout() {
+            if (isInternalNav) return;
+            var url = new URL('../api/admin-log-activity.php', window.location.href).href;
+            var data = JSON.stringify({ action: 'logout' });
+            navigator.sendBeacon(url, new Blob([data], { type: 'application/json' }));
+        }
+
+        window.addEventListener('pagehide', sendLogout);
+        window.addEventListener('beforeunload', sendLogout);
+    })();
+    </script>
 </body>
 </html>
-

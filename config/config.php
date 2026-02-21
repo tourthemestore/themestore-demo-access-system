@@ -62,9 +62,6 @@ define('VIMEO_EMBED_URL', 'https://player.vimeo.com/video/' . VIMEO_VIDEO_ID);
 // Set this to match the password configured in your Vimeo video settings
 define('VIMEO_VIDEO_PASSWORD', 'info!@#1234'); // Add your Vimeo video password here
 
-// Admin leads area: password required to access admin-leads.php and admin-lead-detail.php
-define('ADMIN_LEADS_PASSWORD', 'itourstheme123'); // Change this to your secure password
-
 // Admin notification email: receives alerts when a lead abandons the demo video (closes without completing)
 define('ADMIN_NOTIFICATION_EMAIL', 'info@tourthemestore.com'); // Change to your team email
 

@@ -247,6 +247,14 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                 <button type="button" id="mobile-notice-dismiss" class="mobile-notice-dismiss" aria-label="Dismiss">Continue on mobile</button>
             </div>
 
+            <?php if ($vimeoPassword): ?>
+            <div style="margin-bottom: 15px; padding: 12px 16px; background: #fff3cd; border: 1px solid #ffc107; border-radius: 8px; text-align: center;">
+                <strong style="color: #856404;">🔒 Video Password:</strong>
+                <code style="background: #fff; padding: 4px 10px; border-radius: 4px; font-size: 16px; font-weight: 700; letter-spacing: 0.5px; user-select: all; border: 1px solid #e0c36a;"><?php echo htmlspecialchars($vimeoPassword, ENT_QUOTES, 'UTF-8'); ?></code>
+                <span style="font-size: 13px; color: #666; margin-left: 6px;">Enter this when prompted by the video player.</span>
+            </div>
+            <?php endif; ?>
+
             <div class="video-wrapper">
                 <?php
                 // Build embed URL with all parameters
@@ -298,12 +306,6 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
 
             <div class="info-message">
                 <strong>Note:</strong> This demo link is valid for 3 hours and can be used up to 3 times.
-                <?php if (defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)): ?>
-                    <br><br>
-                    <strong style="color: #856404;">🔒 Video Password:</strong> The video is password-protected. 
-                    Check your email for the password. 
-                    <br><span style="font-size: 12px; color: #666;">Enter the password when prompted by the video player.</span>
-                <?php endif; ?>
             </div>
             
             <!-- Chatbox for Queries -->
