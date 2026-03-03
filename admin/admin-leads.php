@@ -525,7 +525,7 @@ $totalLeads = count($leads);
                 <div style="text-align:right; font-size:14px;">
                     <?php
                         $uName = htmlspecialchars($loggedInUser['emp_name'] ?? $loggedInUser['username'] ?? '', ENT_QUOTES, 'UTF-8');
-                        $uRole = !empty($loggedInUser['is_admin']) ? 'Admin' : 'Sales';
+                        $uRole = $loggedInUser['role_name'] ?? (!empty($loggedInUser['is_admin']) ? 'Admin' : 'User');
                     ?>
                     Logged in as: <strong><?php echo $uName; ?></strong> (<?php echo $uRole; ?>)
                     &nbsp;|&nbsp;

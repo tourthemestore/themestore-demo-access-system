@@ -6,7 +6,7 @@ CREATE TABLE IF NOT EXISTS `demo_leads_user_log` (
     `emp_id` INT NOT NULL COMMENT 'From roles table',
     `user_name` VARCHAR(255) NOT NULL,
     `emp_name` VARCHAR(255) DEFAULT NULL,
-    `role` VARCHAR(50) NOT NULL COMMENT 'Admin or Sales',
+    `role` VARCHAR(50) NOT NULL COMMENT 'Role label at login time',
     `action` ENUM('login', 'logout') NOT NULL,
     `logged_at` DATETIME NOT NULL,
     PRIMARY KEY (`id`),

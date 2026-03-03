@@ -540,7 +540,7 @@ $timeline = buildActivityTimeline($demoLinks, $videoActivity, $followups, $queri
                 <div style="text-align:right; font-size:13px; color:rgba(255,255,255,0.85);">
                     <?php
                         $uName = htmlspecialchars($loggedInUser['emp_name'] ?? $loggedInUser['username'] ?? '', ENT_QUOTES, 'UTF-8');
-                        $uRole = !empty($loggedInUser['is_admin']) ? 'Admin' : 'Sales';
+                        $uRole = $loggedInUser['role_name'] ?? (!empty($loggedInUser['is_admin']) ? 'Admin' : 'User');
                     ?>
                     <?php echo $uName; ?> (<?php echo $uRole; ?>)
                     &nbsp;|&nbsp;

@@ -39,7 +39,7 @@ try {
         (int) $user['emp_id'],
         $user['username'] ?? '',
         $user['emp_name'] ?? '',
-        !empty($user['is_admin']) ? 'Admin' : 'Sales',
+        $user['role_name'] ?? (!empty($user['is_admin']) ? 'Admin' : 'User'),
         $nowIST
     ]);
 

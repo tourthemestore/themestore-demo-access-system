@@ -3,7 +3,7 @@
  * Admin Auth - ThemeStore Demo Access System
  * Login via roles table (user_name + password).
  * Admin (emp_id = 0) sees all leads.
- * Sales (role_id = 6) sees only their assigned leads.
+ * Non-admin users see only their assigned leads.
  * Logs login/logout to demo_leads_user_log table.
  */
 
@@ -31,13 +31,36 @@ function logUserActivity(array $user, string $action): void
             (int) ($user['emp_id'] ?? 0),
             $user['username'] ?? '',
             $user['emp_name'] ?? '',
-            !empty($user['is_admin']) ? 'Admin' : 'Sales',
+            $user['role_name'] ?? (!empty($user['is_admin']) ? 'Admin' : 'User'),
             $action,
             $nowIST
         ]);
     } catch (Throwable $e) {
         error_log("logUserActivity error: " . $e->getMessage());
     }
+}
+
+/**
+ * Resolve role name from role_master by role_id.
+ */
+function resolveRoleName(PDO $pdo, int $roleId): ?string
+{
+    try {
+        $roleStmt = $pdo->prepare("SELECT * FROM role_master WHERE role_id = ? LIMIT 1");
+        $roleStmt->execute([$roleId]);
+        $roleRow = $roleStmt->fetch();
+        if (!$roleRow) {
+            return null;
+        }
+        foreach (['role_name', 'role', 'name', 'title'] as $key) {
+            if (isset($roleRow[$key]) && trim((string) $roleRow[$key]) !== '') {
+                return (string) $roleRow[$key];
+            }
+        }
+    } catch (Throwable $e) {
+        // ignore and fallback
+    }
+    return null;
 }
 
 // Handle logout first (before session check)
@@ -56,11 +79,14 @@ if (isset($_GET['logout'])) {
 if (!empty($_SESSION[$sessionKey])) {
     try {
         $pdo = getDbConnection();
-        $checkStmt = $pdo->prepare("SELECT active_flag FROM roles WHERE user_name = ? LIMIT 1");
+        $checkStmt = $pdo->prepare("SELECT * FROM roles WHERE user_name = ? LIMIT 1");
         $checkStmt->execute([$_SESSION[$sessionKey]['username'] ?? '']);
         $checkRow = $checkStmt->fetch();
 
-        if (!$checkRow || strtolower(trim($checkRow['active_flag'] ?? '')) !== 'active') {
+        $isActive = $checkRow && strtolower(trim($checkRow['active_flag'] ?? '')) === 'active';
+        $hasLoginAccess = !isset($checkRow['login_access']) || strtolower(trim($checkRow['login_access'] ?? '')) === 'yes';
+
+        if (!$checkRow || !$isActive || !$hasLoginAccess) {
             logUserActivity($_SESSION[$sessionKey], 'logout');
             unset($_SESSION[$sessionKey]);
             session_destroy();
@@ -91,10 +117,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['p
         try {
             $pdo = getDbConnection();
             $stmt = $pdo->prepare("
-                SELECT emp_id, role_id, user_name, password, active_flag
-                FROM roles
-                WHERE user_name = ?
-                LIMIT 1
+                SELECT * FROM roles WHERE user_name = ? LIMIT 1
             ");
             $stmt->execute([$username]);
             $user = $stmt->fetch();
@@ -103,6 +126,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['p
                 $error = 'Invalid username or password.';
             } elseif (strtolower(trim($user['active_flag'] ?? '')) !== 'active') {
                 $error = 'This account is inactive. Please contact admin.';
+            } elseif (isset($user['login_access']) && strtolower(trim($user['login_access'] ?? '')) !== 'yes') {
+                $error = 'You do not have login access. Please contact admin.';
             } else {
                 // Check password — try direct match first, then password_verify
                 $passwordMatch = false;
@@ -115,50 +140,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['username'], $_POST['p
                 if (!$passwordMatch) {
                     $error = 'Invalid username or password.';
                 } else {
-                    // Only admin (emp_id=0) or sales (role_id=6) allowed
                     $empId = (int) $user['emp_id'];
                     $roleId = (int) $user['role_id'];
                     $isAdmin = ($empId === 0);
-                    $isSales = ($roleId === 6);
+                    $roleName = $isAdmin ? 'Admin' : (resolveRoleName($pdo, $roleId) ?: 'User');
 
-                    if (!$isAdmin && !$isSales) {
-                        $error = 'You do not have permission to access this area.';
-                    } else {
-                        // Get employee name from emp_master if available
-                        $empName = $username;
-                        try {
-                            if ($empId > 0) {
-                                $empStmt = $pdo->prepare("SELECT emp_name FROM emp_master WHERE emp_id = ? LIMIT 1");
-                                $empStmt->execute([$empId]);
-                                $empRow = $empStmt->fetch();
-                                if ($empRow && !empty($empRow['emp_name'])) {
-                                    $empName = $empRow['emp_name'];
-                                }
-                            } else {
-                                $empName = 'Admin';
+                    // Get employee name from emp_master if available
+                    $empName = $username;
+                    try {
+                        if ($empId > 0) {
+                            $empStmt = $pdo->prepare("SELECT emp_name FROM emp_master WHERE emp_id = ? LIMIT 1");
+                            $empStmt->execute([$empId]);
+                            $empRow = $empStmt->fetch();
+                            if ($empRow && !empty($empRow['emp_name'])) {
+                                $empName = $empRow['emp_name'];
                             }
-                        } catch (Throwable $e) {
-                            // ignore, use username
+                        } else {
+                            $empName = 'Admin';
                         }
-
-                        $userData = [
-                            'emp_id'   => $empId,
-                            'role_id'  => $roleId,
-                            'username' => $user['user_name'],
-                            'emp_name' => $empName,
-                            'is_admin' => $isAdmin,
-                        ];
-
-                        $_SESSION[$sessionKey] = $userData;
-
-                        // Log login
-                        logUserActivity($userData, 'login');
-
-                        // Always redirect to dashboard after login
-                        $adminDir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
-                        header('Location: ' . $adminDir . '/index.php', true, 302);
-                        exit;
+                    } catch (Throwable $e) {
+                        // ignore, use username
                     }
+
+                    $userData = [
+                        'emp_id'   => $empId,
+                        'role_id'  => $roleId,
+                        'username' => $user['user_name'],
+                        'emp_name' => $empName,
+                        'role_name'=> $roleName,
+                        'is_admin' => $isAdmin,
+                    ];
+
+                    $_SESSION[$sessionKey] = $userData;
+
+                    // Log login
+                    logUserActivity($userData, 'login');
+
+                    // Always redirect to dashboard after login
+                    $adminDir = rtrim(dirname($_SERVER['SCRIPT_NAME']), '/');
+                    header('Location: ' . $adminDir . '/index.php', true, 302);
+                    exit;
                 }
             }
         } catch (Throwable $e) {
