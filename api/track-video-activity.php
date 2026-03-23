@@ -391,6 +391,7 @@ try {
     if ($success) {
         // Send admin notification email when lead abandons (closes video without completing)
         if ($eventType === 'abandoned') {
+            error_log("Abandoned event received for lead_id={$leadId}, demo_link_id={$demoLinkId}, progress={$progressPercentage}, duration={$durationWatched}");
             try {
                 $leadStmt = $pdo->prepare("SELECT company_name, email FROM leads_for_demo WHERE id = ? LIMIT 1");
                 $leadStmt->execute([$leadId]);
@@ -404,7 +405,7 @@ try {
                         $durationWatched
                     );
                 }
-            } catch (Exception $e) {
+            } catch (Throwable $e) {
                 error_log("Failed to send abandoned notification email: " . $e->getMessage());
             }
         }

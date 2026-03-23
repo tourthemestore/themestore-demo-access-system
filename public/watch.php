@@ -168,6 +168,27 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             font-size: 14px;
             text-align: center;
         }
+        .themes-cta-wrap {
+            margin-top: 14px;
+            margin-bottom: 18px;
+            text-align: left;
+        }
+        .themes-cta-btn {
+            display: inline-block;
+            background: #667eea;
+            color: #fff;
+            text-decoration: none;
+            padding: 12px 22px;
+            border-radius: 8px;
+            font-size: 15px;
+            font-weight: 600;
+            box-shadow: 0 6px 18px rgba(102, 126, 234, 0.35);
+            transition: background 0.2s ease, transform 0.2s ease;
+        }
+        .themes-cta-btn:hover {
+            background: #5568d3;
+            transform: translateY(-1px);
+        }
         .mobile-notice {
             display: none;
             background: linear-gradient(135deg, #fff8e1 0%, #ffecb3 100%);
@@ -292,6 +313,11 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                     <p style="font-size: 18px; margin-bottom: 10px;">Video unavailable</p>
                     <p style="font-size: 14px;">Please check Vimeo video settings to allow embedding</p>
                 </div>
+            </div>
+            <div class="themes-cta-wrap">
+                <a href="https://tourthemestore.com/" target="_blank" rel="noopener noreferrer" class="themes-cta-btn">
+                    View Themes
+                </a>
             </div>
 
             <!-- Interest selection (Interested / Not interested) -->
@@ -446,6 +472,7 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
             let lastTrackedProgress = 0;
             let lastKnownCurrentTime = 0;
             let lastKnownDuration = 1;
+            let abandonedTracked = false;
             
             function initializePlayer() {
                 if (playerInitialized) return;
@@ -546,13 +573,21 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
 
                 // Track abandoned when user closes tab/window without completing
                 function trackAbandonedIfNeeded() {
+                    if (abandonedTracked) return;
                     if (hasPlayed && !hasTrackedCompletion) {
+                        abandonedTracked = true;
                         const progress = lastKnownDuration > 0 ? (lastKnownCurrentTime / lastKnownDuration) * 100 : 0;
                         trackVideoEventBeacon('abandoned', progress, lastKnownCurrentTime);
                     }
                 }
                 window.addEventListener('beforeunload', trackAbandonedIfNeeded);
                 window.addEventListener('pagehide', trackAbandonedIfNeeded);
+                // Some mobile browsers don't reliably fire beforeunload/pagehide.
+                document.addEventListener('visibilitychange', function() {
+                    if (document.visibilityState === 'hidden') {
+                        trackAbandonedIfNeeded();
+                    }
+                });
                 
                 // Handle errors
                 player.on('error', function(error) {
@@ -591,7 +626,16 @@ $vimeoPassword = defined('VIMEO_VIDEO_PASSWORD') && !empty(VIMEO_VIDEO_PASSWORD)
                     progress_percentage: progressPercentage,
                     duration_watched: durationWatched
                 });
-                navigator.sendBeacon(url, new Blob([data], { type: 'application/json' }));
+                const ok = navigator.sendBeacon(url, new Blob([data], { type: 'application/json' }));
+                if (!ok) {
+                    // Fallback for browsers where sendBeacon fails
+                    fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: data,
+                        keepalive: true
+                    }).catch(function() {});
+                }
             }
             
             
